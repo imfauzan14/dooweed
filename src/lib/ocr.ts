@@ -152,16 +152,37 @@ function extractTransactionType(text: string): 'income' | 'expense' | null {
  * Usually the first non-empty line or prominent text at top
  */
 function extractMerchant(text: string): string | null {
+    // Specific known merchants (to handle logo text or specific formats)
+    const knownMerchants = [
+        { pattern: /alfamart|alfaria/i, name: 'Alfamart' },
+        { pattern: /indomaret|indomarco/i, name: 'Indomaret' },
+        { pattern: /starbucks/i, name: 'Starbucks' },
+        { pattern: /mcdonald/i, name: "McDonald's" },
+        { pattern: /kfc|kentucky fried/i, name: 'KFC' },
+        { pattern: /burger king/i, name: 'Burger King' },
+        { pattern: /hokben|hoka hoka/i, name: 'HokBen' },
+        { pattern: /superindo/i, name: 'SuperIndo' },
+        { pattern: /hypermart/i, name: 'Hypermart' },
+    ];
+
+    // Check for known merchants first
+    for (const m of knownMerchants) {
+        if (m.pattern.test(text)) {
+            return m.name;
+        }
+    }
+
     const lines = text.split('\n').filter(line => line.trim().length > 2);
 
     // First few lines often contain merchant name
-    for (let i = 0; i < Math.min(3, lines.length); i++) {
+    for (let i = 0; i < Math.min(4, lines.length); i++) {
         const line = lines[i].trim();
-        // Skip lines that look like addresses, dates, or numbers
+        // Skip lines that look like addresses, dates, numbers, or headers
         if (
             !line.match(/^\d+/) &&
-            !line.match(/jl\.|jln\.|street|road|ave/i) &&
+            !line.match(/jl\.|jln\.|street|road|ave|blok|kav/i) &&
             !line.match(/\d{2}[\/\-]\d{2}[\/\-]\d{2,4}/) &&
+            !line.match(/date|tgl|waktu|time|kasir|bon/i) &&
             line.length > 3
         ) {
             return line.replace(/[^a-zA-Z0-9\s&'-]/g, '').trim();
@@ -177,8 +198,8 @@ function extractMerchant(text: string): string | null {
  */
 function extractDate(text: string): string | null {
     const datePatterns = [
-        // DD/MM/YYYY or DD-MM-YYYY
-        /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/,
+        // DD/MM/YYYY or DD-MM-YYYY (with loose checking for Tgl/Date prefix)
+        /(?:tgl|date|tanggal|waktu)?[\s:.]*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/i,
         // YYYY-MM-DD or YYYY/MM/DD
         /(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/,
         // DD MMM YYYY or DD MMMM YYYY
@@ -231,22 +252,27 @@ function extractTotal(text: string): { amount: number | null; currency: string |
     const lines = text.split('\n');
 
     // Keywords that indicate total amount (English and Indonesian)
+    // Keywords that indicate total amount (English and Indonesian)
+    // Order matters! Specific terms first.
     const totalKeywords = [
-        'grand total', 'total', 'subtotal', 'sub total', 'jumlah', 'bayar',
-        'amount due', 'to pay', 'net amount', 'total bayar', 'total harga'
+        'total belanja', 'total bayar', 'total harga', 'jumlah bayar', 'tagihan', // High priority
+        'grand total', 'amount due', 'net amount', 'to pay', // High priority English
+        'subtotal', 'sub total', 'total', 'jumlah' // Generic (lower priority)
     ];
 
     // Keywords that indicate NON-price numbers (to exclude)
     const excludeKeywords = [
         'rekening', 'account', 'rek', 'no.', 'nomor', 'telp', 'phone', 'hp', 'wa',
         'order', 'invoice', 'ref', 'trx', 'id', 'npwp', 'nik', 'ktp', 'bca', 'bni',
-        'mandiri', 'bri', 'cimb', 'permata', 'danamon', 'bank', 'customer', 'pelanggan'
+        'mandiri', 'bri', 'cimb', 'permata', 'danamon', 'bank', 'customer', 'pelanggan',
+        'total item', 'total qty', 'total quantity', 'total diskon', 'total disc', 'total discount', 'disc', 'diskon', 'kembalian', 'change'
     ];
 
     let bestMatch: { amount: number; currency: string } | null = null;
     let bestKeywordIndex = -1;
 
-    for (const line of lines) {
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex];
         const lowerLine = line.toLowerCase();
 
         // Skip lines with exclude keywords (bank accounts, phone numbers, etc.)
@@ -256,8 +282,20 @@ function extractTotal(text: string): { amount: number | null; currency: string |
 
         for (let i = 0; i < totalKeywords.length; i++) {
             if (lowerLine.includes(totalKeywords[i])) {
-                // Extract amount from this line
-                const amountMatch = extractAmountFromLine(line, false);
+                // Extract amount from THIS line
+                let amountMatch = extractAmountFromLine(line, false);
+
+                // If not found on this line, check the NEXT line (often happens with wide receipts)
+                if (!amountMatch && lineIndex + 1 < lines.length) {
+                    const nextLine = lines[lineIndex + 1];
+                    // Verify next line isn't another keyword line or excluded line
+                    const nextLineLower = nextLine.toLowerCase();
+                    if (!totalKeywords.some(kw => nextLineLower.includes(kw)) &&
+                        !excludeKeywords.some(kw => nextLineLower.includes(kw))) {
+                        amountMatch = extractAmountFromLine(nextLine, false);
+                    }
+                }
+
                 if (amountMatch && (bestKeywordIndex === -1 || i < bestKeywordIndex)) {
                     bestMatch = amountMatch;
                     bestKeywordIndex = i;
@@ -428,7 +466,7 @@ function extractAmountFromLine(line: string, requireCurrencySymbol: boolean = fa
     }
 
     // Indonesian-style numbers at end of line
-    const idrEndPattern = /\s([\d.]+)\s*$/;
+    const idrEndPattern = /\s([\d.,]+)\s*$/;
     const endMatch = line.match(idrEndPattern);
     if (endMatch) {
         const amount = parseIndonesianNumber(endMatch[1]);
