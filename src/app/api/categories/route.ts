@@ -1,0 +1,177 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/db';
+import { categories, users } from '@/db/schema';
+import { eq, and } from 'drizzle-orm';
+import { v4 as uuid } from 'uuid';
+import { seedCategories } from '@/lib/seed';
+
+const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
+
+// Ensure default user exists (for foreign key constraints)
+async function ensureDefaultUser() {
+    const existingUser = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, DEFAULT_USER_ID))
+        .limit(1);
+
+    if (existingUser.length === 0) {
+        await db.insert(users).values({
+            id: DEFAULT_USER_ID,
+            email: 'default@example.com',
+            name: 'Default User',
+            defaultCurrency: 'IDR',
+        });
+    }
+}
+
+// GET /api/categories - List all categories
+export async function GET() {
+    try {
+        const result = await db
+            .select()
+            .from(categories)
+            .where(eq(categories.userId, DEFAULT_USER_ID));
+
+        // If no categories exist, seed default ones
+        if (result.length === 0) {
+            // Ensure default user exists first (for foreign key)
+            await ensureDefaultUser();
+
+            const toInsert = seedCategories.map((cat) => ({
+                ...cat,
+                id: uuid(),
+                userId: DEFAULT_USER_ID,
+            }));
+
+            await db.insert(categories).values(toInsert);
+
+            return NextResponse.json({ data: toInsert, seeded: true });
+        }
+
+        return NextResponse.json({ data: result });
+    } catch (error) {
+        console.error('Error fetching categories:', error);
+        return NextResponse.json(
+            { error: 'Failed to fetch categories' },
+            { status: 500 }
+        );
+    }
+}
+
+// POST /api/categories - Create a new category
+export async function POST(request: NextRequest) {
+    try {
+        const body = await request.json();
+        const { name, type, icon, color } = body;
+
+        if (!name || !type) {
+            return NextResponse.json(
+                { error: 'Missing required fields: name, type' },
+                { status: 400 }
+            );
+        }
+
+        if (type !== 'income' && type !== 'expense') {
+            return NextResponse.json(
+                { error: 'Type must be either "income" or "expense"' },
+                { status: 400 }
+            );
+        }
+
+        const id = uuid();
+        const newCategory = {
+            id,
+            userId: DEFAULT_USER_ID,
+            name,
+            type: type as 'income' | 'expense',
+            icon: icon || '📁',
+            color: color || '#6B7280',
+        };
+
+        await db.insert(categories).values(newCategory);
+
+        return NextResponse.json({ data: newCategory }, { status: 201 });
+    } catch (error) {
+        console.error('Error creating category:', error);
+        return NextResponse.json(
+            { error: 'Failed to create category' },
+            { status: 500 }
+        );
+    }
+}
+
+// PUT /api/categories - Update a category (bulk update for drag-n-drop reorder)
+export async function PUT(request: NextRequest) {
+    try {
+        const body = await request.json();
+        const { id, name, icon, color } = body;
+
+        if (!id) {
+            return NextResponse.json({ error: 'Category ID is required' }, { status: 400 });
+        }
+
+        const existing = await db
+            .select()
+            .from(categories)
+            .where(and(eq(categories.id, id), eq(categories.userId, DEFAULT_USER_ID)))
+            .limit(1);
+
+        if (existing.length === 0) {
+            return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+        }
+
+        const updateValues: Partial<typeof categories.$inferInsert> = {};
+        if (name) updateValues.name = name;
+        if (icon) updateValues.icon = icon;
+        if (color) updateValues.color = color;
+
+        await db.update(categories).set(updateValues).where(eq(categories.id, id));
+
+        const updated = await db
+            .select()
+            .from(categories)
+            .where(eq(categories.id, id))
+            .limit(1);
+
+        return NextResponse.json({ data: updated[0] });
+    } catch (error) {
+        console.error('Error updating category:', error);
+        return NextResponse.json(
+            { error: 'Failed to update category' },
+            { status: 500 }
+        );
+    }
+}
+
+// DELETE /api/categories - Delete a category
+export async function DELETE(request: NextRequest) {
+    try {
+        const { searchParams } = new URL(request.url);
+        const id = searchParams.get('id');
+
+        if (!id) {
+            return NextResponse.json({ error: 'Category ID is required' }, { status: 400 });
+        }
+
+        const existing = await db
+            .select()
+            .from(categories)
+            .where(and(eq(categories.id, id), eq(categories.userId, DEFAULT_USER_ID)))
+            .limit(1);
+
+        if (existing.length === 0) {
+            return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+        }
+
+        await db.delete(categories).where(eq(categories.id, id));
+
+        return NextResponse.json({ message: 'Category deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting category:', error);
+        return NextResponse.json(
+            { error: 'Failed to delete category' },
+            { status: 500 }
+        );
+    }
+}
