@@ -41,7 +41,7 @@ export default function RecurringPage() {
         amount: '',
         categoryId: '',
         description: '',
-        frequency: 'monthly' as const,
+        frequency: 'monthly' as 'daily' | 'weekly' | 'monthly' | 'yearly',
         startDate: format(new Date(), 'yyyy-MM-dd'),
         endDate: '',
     });

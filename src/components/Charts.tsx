@@ -24,6 +24,7 @@ interface CategoryData {
     value: number;
     color: string;
     icon?: string;
+    [key: string]: any;
 }
 
 interface MonthlyData {
@@ -72,7 +73,7 @@ export function ExpensePieChart({ data }: { data: CategoryData[] }) {
                         paddingAngle={2}
                         dataKey="value"
                         label={({ name, percent }) =>
-                            percent > 0.05 ? `${name} (${(percent * 100).toFixed(0)}%)` : ''
+                            (percent || 0) > 0.05 ? `${name} (${((percent || 0) * 100).toFixed(0)}%)` : ''
                         }
                         labelLine={false}
                     >
@@ -152,9 +153,9 @@ export function MonthlyBarChart({ data }: { data: MonthlyData[] }) {
                         contentStyle={tooltipStyle}
                         labelStyle={tooltipLabelStyle}
                         itemStyle={{ color: '#fff' }}
-                        formatter={(value: number, name: string) => [
-                            formatCurrency(value, 'IDR'),
-                            name.charAt(0).toUpperCase() + name.slice(1),
+                        formatter={(value: number | undefined, name: string | undefined) => [
+                            formatCurrency(value || 0, 'IDR'),
+                            (name || '').charAt(0).toUpperCase() + (name || '').slice(1),
                         ]}
                         labelFormatter={(label) => {
                             const date = new Date(label + '-01');
@@ -240,7 +241,7 @@ export function BalanceTrendChart({ data }: { data: MonthlyData[] }) {
                     <Tooltip
                         contentStyle={tooltipStyle}
                         labelStyle={tooltipLabelStyle}
-                        formatter={(value: number) => [formatCurrency(value, 'IDR'), 'Balance']}
+                        formatter={(value: number | undefined) => [formatCurrency(value || 0, 'IDR'), 'Balance']}
                         labelFormatter={(label) => {
                             const date = new Date(label + '-01');
                             return date.toLocaleDateString('en-US', {
