@@ -4,6 +4,7 @@ import { transactions, categories } from '@/db/schema';
 import { eq, and, gte, lte, desc } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import { convertCurrency } from '@/lib/currency';
+import { transactionSchema, validateInput, validatePagination } from '@/lib/validation';
 
 const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
 
@@ -17,6 +18,9 @@ export async function GET(request: NextRequest) {
         const type = searchParams.get('type');
         const limit = parseInt(searchParams.get('limit') || '100');
         const offset = parseInt(searchParams.get('offset') || '0');
+
+        // Validate and sanitize pagination
+        const { limit: safeLimit, offset: safeOffset } = validatePagination({ limit: limit.toString(), offset: offset.toString() });
 
         let query = db
             .select({
@@ -54,8 +58,8 @@ export async function GET(request: NextRequest) {
             .leftJoin(categories, eq(transactions.categoryId, categories.id))
             .where(and(...conditions))
             .orderBy(desc(transactions.date))
-            .limit(limit)
-            .offset(offset);
+            .limit(safeLimit)
+            .offset(safeOffset);
 
         const data = results.map(({ transaction, category }) => ({
             ...transaction,
@@ -87,23 +91,31 @@ export async function POST(request: NextRequest) {
             recurringId,
         } = body;
 
-        // Validate required fields
-        if (!type || !amount || !date) {
+        // Validate input
+        const validation = validateInput(transactionSchema, body);
+        if (!validation.success) {
             return NextResponse.json(
-                { error: 'Missing required fields: type, amount, date' },
+                { error: validation.error },
                 { status: 400 }
             );
         }
 
+        const validData = validation.data;
+
         // Convert to base currency (IDR)
-        let amountInBase = amount;
-        if (currency !== 'IDR') {
-            console.log(`[DEBUG] Converting ${amount} ${currency} to IDR on ${date}`);
+        let amountInBase = validData.amount;
+        if (validData.currency !== 'IDR') {
+            console.log(`[DEBUG] Converting ${validData.amount} ${validData.currency} to IDR on ${validData.date}`);
             try {
-                amountInBase = await convertCurrency(amount, currency, 'IDR', date);
+                amountInBase = await convertCurrency(validData.amount, validData.currency, 'IDR', validData.date);
                 console.log(`[DEBUG] Converted result: ${amountInBase}`);
             } catch (err) {
                 console.error(`[DEBUG] Conversion failed:`, err);
+                // Use fallback or return error
+                return NextResponse.json(
+                    { error: 'Currency conversion failed. Please try again.' },
+                    { status: 503 }
+                );
             }
         }
 
@@ -111,15 +123,15 @@ export async function POST(request: NextRequest) {
         const newTransaction = {
             id,
             userId: DEFAULT_USER_ID,
-            type: type as 'income' | 'expense',
-            amount: parseFloat(amount),
-            currency,
+            type: validData.type,
+            amount: validData.amount,
+            currency: validData.currency,
             amountInBase,
-            categoryId: categoryId || null,
-            description: description || null,
-            date,
-            receiptId: receiptId || null,
-            recurringId: recurringId || null,
+            categoryId: validData.categoryId || null,
+            description: validData.description || null,
+            date: validData.date,
+            receiptId: validData.receiptId || null,
+            recurringId: validData.recurringId || null,
         };
 
         await db.insert(transactions).values(newTransaction);

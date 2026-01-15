@@ -11,6 +11,11 @@ import { CURRENCIES } from '@/lib/currency';
 import { format } from 'date-fns';
 import { createPortal } from 'react-dom';
 
+interface EnhancedOCRResult {
+    enhancementUsed?: boolean;
+    processingTime?: number;
+}
+
 interface Category {
     id: string;
     name: string;
@@ -43,6 +48,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
     const [isProcessing, setIsProcessing] = useState(false);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isReviewMode, setIsReviewMode] = useState(false);
+    const [useEnhancement, setUseEnhancement] = useState(true); // DeepSeek enhancement toggle
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const completedResults = results.filter(r => r.status === 'completed');
@@ -77,12 +83,48 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
             const index = startIndex + i;
 
             try {
-                const imageBase64 = await compressImage(file);
-                const ocrResult = await extractReceiptData(imageBase64);
+                const compressedImage = await compressImage(file);
 
+                // Step 1: Always run Tesseract client-side
+                const tesseractResult = await extractReceiptData(compressedImage);
+
+                // Step 2: If enhancement enabled, send raw text to DeepSeek API
+                let ocrResult: OCRResult & EnhancedOCRResult = tesseractResult;
+
+                if (useEnhancement && tesseractResult.rawText) {
+                    try {
+                        const response = await fetch('/api/ocr-enhanced', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ rawText: tesseractResult.rawText }),
+                        });
+
+                        if (response.ok) {
+                            const { data } = await response.json();
+                            // Merge DeepSeek results with Tesseract fallback
+                            ocrResult = {
+                                rawText: tesseractResult.rawText,
+                                merchant: data.merchant || tesseractResult.merchant,
+                                date: data.date || tesseractResult.date,
+                                amount: data.amount ?? tesseractResult.amount,
+                                currency: data.currency || tesseractResult.currency,
+                                transactionType: data.transactionType || tesseractResult.transactionType,
+                                confidence: data.confidence ?? tesseractResult.confidence,
+                                items: data.items || tesseractResult.items,
+                                enhancementUsed: true,
+                            };
+                            console.log('[ReceiptScanner] ✅ DeepSeek enhancement used');
+                        } else {
+                            throw new Error('API returned error');
+                        }
+                    } catch (error) {
+                        console.warn('[ReceiptScanner] DeepSeek failed, using Tesseract:', error);
+                        ocrResult = { ...tesseractResult, enhancementUsed: false };
+                    }
+                }
                 const completedResult: ScanResult = {
                     ...ocrResult,
-                    imageBase64,
+                    imageBase64: compressedImage,
                     status: 'completed',
                     editedType: ocrResult.transactionType || 'expense',
                     editedAmount: ocrResult.amount || undefined,
@@ -124,8 +166,22 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
         processFiles(Array.from(e.dataTransfer.files));
     }, [processFiles]);
 
-    const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        processFiles(e.target.files ? Array.from(e.target.files) : []);
+    const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length === 0) return;
+
+        // Validate file sizes (max 10MB per file)
+        const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+        for (const file of files) {
+            if (file.size > MAX_FILE_SIZE) {
+                alert(`File "${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum size is 10MB.`);
+                if (fileInputRef.current) fileInputRef.current.value = ''; // Clear input even if one file fails
+                return;
+            }
+        }
+
+        setIsProcessing(true);
+        processFiles(files);
         if (fileInputRef.current) fileInputRef.current.value = '';
     }, [processFiles]);
 
@@ -206,7 +262,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                         type="file"
                         accept="image/*"
                         multiple
-                        onChange={handleFileSelect}
+                        onChange={handleFileChange}
                         className="hidden"
                     />
                     <div className="flex flex-col items-center gap-3 md:gap-4">
@@ -214,12 +270,25 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                             <Upload className={cn('w-6 h-6 md:w-8 md:h-8', isDragging ? 'text-blue-400' : 'text-gray-400')} />
                         </div>
                         <div>
-                            <p className="text-base md:text-lg font-medium text-white">
-                                {isDragging ? 'Drop receipts here' : 'Upload receipt images'}
+                            <h3 className="text-base md:text-lg font-bold text-white">
+                                Drop receipts here or click to browse
+                            </h3>
+                            <p className="text-xs md:text-sm text-gray-400 mt-1">
+                                Supports JPG, PNG, WebP (max 10MB
+                                each)
                             </p>
-                            <p className="text-xs md:text-sm text-gray-500 mt-1">
-                                Drag & drop or tap to select • Batch upload supported
-                            </p>
+                            <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500">
+                                <input
+                                    type="checkbox"
+                                    id="useEnhancement"
+                                    checked={useEnhancement}
+                                    onChange={(e) => setUseEnhancement(e.target.checked)}
+                                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-800"
+                                />
+                                <label htmlFor="useEnhancement" className="cursor-pointer select-none">
+                                    ✨ Use AI Enhancement (DeepSeek) - Better accuracy
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>

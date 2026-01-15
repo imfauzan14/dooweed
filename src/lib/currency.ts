@@ -7,6 +7,7 @@ export interface ExchangeRateResponse {
 }
 
 const FRANKFURTER_API = 'https://api.frankfurter.dev';
+const EXCHANGERATE_API = 'https://api.exchangerate-api.com/v4/latest'; // Free, supports IDR
 
 // Common currencies with their symbols
 export const CURRENCIES = {
@@ -76,6 +77,7 @@ export async function getHistoricalRate(
 
 /**
  * Convert amount between currencies
+ * Uses Frankfurter API first, falls back to ExchangeRate-API for IDR support
  */
 export async function convertCurrency(
     amount: number,
@@ -83,12 +85,55 @@ export async function convertCurrency(
     to: string,
     date?: string
 ): Promise<number> {
-    console.log(`[Currency] Fetching rate for ${from} -> ${to} (Date: ${date || 'Latest'})`);
+    console.log(`[Currency] Converting ${amount} ${from} -> ${to} (Date: ${date || 'Latest'})`);
+
+    // Check if conversion involves IDR - use ExchangeRate-API since Frankfurter doesn't support it
+    if (from === 'IDR' || to === 'IDR') {
+        try {
+            const baseResponse = await fetch(`${EXCHANGERATE_API}/${from}`);
+            if (!baseResponse.ok) throw new Error('ExchangeRate-API failed');
+
+            const data = await baseResponse.json();
+            const rate = data.rates[to];
+
+            if (!rate) throw new Error(`No rate found for ${to}`);
+
+            const converted = amount * rate;
+            console.log(`[Currency] ExchangeRate-API: ${from} ${amount} x ${rate} = ${to} ${converted}`);
+            return converted;
+        } catch (error) {
+            console.error('[Currency] ExchangeRate-API failed:', error);
+            // Fallback to hardcoded rate if API fails
+            const fallbackRate = getFallbackRate(from, to);
+            console.warn(`[Currency] Using fallback rate: ${fallbackRate}`);
+            return amount * fallbackRate;
+        }
+    }
+
+    // For non-IDR conversions, use Frankfurter (more accurate for EUR/USD etc.)
     const rate = date
         ? await getHistoricalRate(from, to, date)
         : await getExchangeRate(from, to);
-    console.log(`[Currency] Rate: ${rate}, Converted: ${amount * rate}`);
-    return amount * rate;
+
+    const converted = amount * rate;
+    console.log(`[Currency] Frankfurter: ${from} ${amount} x ${rate} = ${to} ${converted}`);
+    return converted;
+}
+
+/**
+ * Fallback exchange rates (approximate, updated periodically)
+ * Used when APIs fail
+ */
+function getFallbackRate(from: string, to: string): number {
+    const rates: Record<string, Record<string, number>> = {
+        'USD': { 'IDR': 15700, 'EUR': 0.92, 'GBP': 0.79 },
+        'EUR': { 'IDR': 17100, 'USD': 1.09, 'GBP': 0.86 },
+        'GBP': { 'IDR': 19900, 'USD': 1.27, 'EUR': 1.16 },
+        'IDR': { 'USD': 0.000064, 'EUR': 0.000058, 'GBP': 0.00005 },
+    };
+
+    if (from === to) return 1;
+    return rates[from]?.[to] || rates[to]?.[from] ? 1 / rates[to]![from]! : 1;
 }
 
 /**

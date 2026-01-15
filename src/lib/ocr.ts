@@ -102,88 +102,66 @@ export async function batchExtractReceipts(
 
 /**
  * Extract transaction type (income or expense) from receipt text
- * Looks for +/- signs and keywords like "uang masuk", "uang keluar", "receive", etc.
+ * Simplified fallback logic - DeepSeek handles complex cases
  */
 function extractTransactionType(text: string): 'income' | 'expense' | null {
     const lowerText = text.toLowerCase();
 
-    // Indonesian keywords
-    const incomeKeywordsID = ['uang masuk', 'terima', 'diterima', 'masuk', 'receive'];
-    const expenseKeywordsID = ['uang keluar', 'bayar', 'dibayar', 'keluar', 'payment', 'pembelian'];
-
-    // Check for +/- signs before amounts
-    // Pattern: +Rp50.000 = income, -Rp400.000 = expense
-    const plusPattern = /\+\s*Rp\.?\s*[\d.,]+/i;
-    const minusPattern = /-\s*Rp\.?\s*[\d.,]+/i;
-
-    if (plusPattern.test(text) || lowerText.includes('+rp')) {
+    // Check for explicit +/- signs (very strong indicator)
+    if (/[\+]\s*(?:Rp\.?|\$|IDR|USD)?\s*[\d.,]+/i.test(text)) {
         return 'income';
     }
-    if (minusPattern.test(text) || lowerText.includes('-rp')) {
+    if (/[-]\s*(?:Rp\.?|\$|IDR|USD)?\s*[\d.,]+/i.test(text)) {
         return 'expense';
     }
 
-    // Check for keywords
-    for (const keyword of incomeKeywordsID) {
-        if (lowerText.includes(keyword)) {
-            return 'income';
-        }
+    // Simple keyword matching (no scoring needed - DeepSeek handles ambiguity)
+    const incomeKeywords = ['receive', 'received', 'terima', 'diterima', 'income', 'pendapatan', 'gaji', 'salary'];
+    const expenseKeywords = ['bayar', 'payment', 'purchase', 'belanja', 'total belanja', 'total bayar'];
+
+    for (const keyword of incomeKeywords) {
+        if (lowerText.includes(keyword)) return 'income';
     }
-    for (const keyword of expenseKeywordsID) {
-        if (lowerText.includes(keyword)) {
-            return 'expense';
-        }
+    for (const keyword of expenseKeywords) {
+        if (lowerText.includes(keyword)) return 'expense';
     }
 
-    // Check for common English patterns
-    if (/received|income|credited|deposit/i.test(lowerText)) {
-        return 'income';
-    }
-    if (/paid|payment|purchase|debit|spent|charge/i.test(lowerText)) {
-        return 'expense';
-    }
-
-    // Default to expense for receipts (most common case)
+    // Default to expense (most receipts are purchases)
     return 'expense';
 }
 
 /**
  * Extract merchant name from receipt text
- * Usually the first non-empty line or prominent text at top
+ * Simplified fallback with top 10 common merchants
  */
 function extractMerchant(text: string): string | null {
-    // Specific known merchants (to handle logo text or specific formats)
+    // Top 10 most common merchants (DeepSeek handles edge cases)
     const knownMerchants = [
         { pattern: /alfamart|alfaria/i, name: 'Alfamart' },
         { pattern: /indomaret|indomarco/i, name: 'Indomaret' },
-        { pattern: /starbucks/i, name: 'Starbucks' },
-        { pattern: /mcdonald/i, name: "McDonald's" },
-        { pattern: /kfc|kentucky fried/i, name: 'KFC' },
-        { pattern: /burger king/i, name: 'Burger King' },
+        { pattern: /starbucks|sbux/i, name: 'Starbucks' },
+        { pattern: /mcdonald'?s?|mcd/i, name: "McDonald's" },
+        { pattern: /kfc|kentucky/i, name: 'KFC' },
         { pattern: /hokben|hoka hoka/i, name: 'HokBen' },
-        { pattern: /superindo/i, name: 'SuperIndo' },
-        { pattern: /hypermart/i, name: 'Hypermart' },
+        { pattern: /grab|gojek/i, name: 'Ride-Hailing' },
+        { pattern: /tokopedia|toped/i, name: 'Tokopedia' },
+        { pattern: /shopee/i, name: 'Shopee' },
+        { pattern: /lazada/i, name: 'Lazada' },
     ];
 
-    // Check for known merchants first
+    // Quick check for known brands
     for (const m of knownMerchants) {
-        if (m.pattern.test(text)) {
-            return m.name;
-        }
+        if (m.pattern.test(text)) return m.name;
     }
 
+    // Simple fallback: first meaningful line
     const lines = text.split('\n').filter(line => line.trim().length > 2);
-
-    // First few lines often contain merchant name
-    for (let i = 0; i < Math.min(4, lines.length); i++) {
+    for (let i = 0; i < Math.min(3, lines.length); i++) {
         const line = lines[i].trim();
-        // Skip lines that look like addresses, dates, numbers, or headers
         if (
             !line.match(/^\d+/) &&
-            !line.match(/jl\.|jln\.|street|road|ave|blok|kav/i) &&
-            !line.match(/\d{2}[\/\-]\d{2}[\/\-]\d{2,4}/) &&
-            !line.match(/date|tgl|waktu|time|kasir|bon/i) &&
-            line.length > 3
+            !line.match(/\d{2}[\/ \-]\d{2}/) &&
+            line.length > 3 && line.length < 50
         ) {
             return line.replace(/[^a-zA-Z0-9\s&'-]/g, '').trim();
         }
@@ -597,12 +575,19 @@ export async function compressImage(
 }
 
 /**
- * Preprocess image for OCR
- * - Check brightness
- * - Invert if dark background (white text on black)
- * - Increase contrast
+ * Preprocess image for better OCR accuracy (browser-only)
+ * Detects dark images and inverts them for better text recognition
+ * Skips preprocessing on server-side (Tesseract works fine without it)
  */
 async function preprocessImageForOCR(imageSource: string | File): Promise<string> {
+    // Skip preprocessing on server-side (no Image/canvas APIs available)
+    if (typeof window === 'undefined') {
+        console.log('[OCR Preprocess] Server-side detected, skipping preprocessing');
+        if (typeof imageSource === 'string') return imageSource;
+        // Convert File to base64 on server (simplified)
+        return imageSource as unknown as string; // Server will handle this differently
+    }
+
     return new Promise((resolve) => {
         const img = new Image();
         const canvas = document.createElement('canvas');
@@ -615,34 +600,39 @@ async function preprocessImageForOCR(imageSource: string | File): Promise<string
 
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const data = imageData.data;
-            let totalBrightness = 0;
 
             // Calculate average brightness
+            let totalBrightness = 0;
             for (let i = 0; i < data.length; i += 4) {
-                totalBrightness += (data[i] + data[i + 1] + data[i + 2]) / 3;
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                totalBrightness += (r + g + b) / 3;
             }
             const avgBrightness = totalBrightness / (data.length / 4);
 
-            // If image is dark (avg brightness < 128), invert it
-            // This converts "white text on black" to "black text on white"
-            if (avgBrightness < 128) {
+            // If image is too dark (avg brightness < 100), invert it
+            if (avgBrightness < 100) {
+                console.log('[OCR Preprocess] Dark image detected, inverting...');
                 for (let i = 0; i < data.length; i += 4) {
-                    data[i] = 255 - data[i];     // R
-                    data[i + 1] = 255 - data[i + 1]; // G
-                    data[i + 2] = 255 - data[i + 2]; // B
-                    // Leave Alpha (data[i+3]) alone
+                    data[i] = 255 - data[i];     // Invert R
+                    data[i + 1] = 255 - data[i + 1]; // Invert G
+                    data[i + 2] = 255 - data[i + 2]; // Invert B
                 }
                 ctx.putImageData(imageData, 0, 0);
             }
 
-            resolve(canvas.toDataURL('image/jpeg', 0.9));
+            resolve(canvas.toDataURL('image/png'));
         };
 
-        // Handle File or String input
         if (typeof imageSource === 'string') {
             img.src = imageSource;
         } else {
-            img.src = URL.createObjectURL(imageSource);
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                img.src = e.target?.result as string;
+            };
+            reader.readAsDataURL(imageSource);
         }
     });
 }
