@@ -3,7 +3,8 @@ import { db } from '@/db';
 import { exchangeRates } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
-import { format, differenceInHours } from 'date-fns';
+import OpenAI from 'openai';
+import { format, differenceInHours, differenceInMinutes } from 'date-fns';
 
 const FRANKFURTER_API = 'https://api.frankfurter.dev';
 
@@ -21,45 +22,7 @@ export async function GET(request: NextRequest) {
 
         const today = format(new Date(), 'yyyy-MM-dd');
 
-        // Check cache first
-        if (!forceRefresh) {
-            const cached = await db
-                .select()
-                .from(exchangeRates)
-                .where(
-                    and(
-                        eq(exchangeRates.baseCurrency, from),
-                        eq(exchangeRates.targetCurrency, to),
-                        eq(exchangeRates.date, today)
-                    )
-                )
-                .limit(1);
-
-            if (cached.length > 0) {
-                const cacheAge = differenceInHours(new Date(), new Date(cached[0].fetchedAt!));
-                // Use cache if less than 6 hours old
-                if (cacheAge < 6) {
-                    return NextResponse.json({
-                        data: { rate: cached[0].rate, from, to, cached: true },
-                    });
-                }
-            }
-        }
-
-        // Fetch fresh rate from Frankfurter
-        const response = await fetch(`${FRANKFURTER_API}/latest?from=${from}&to=${to}`);
-
-        if (!response.ok) {
-            // Return fallback rate if API fails
-            return NextResponse.json({
-                data: { rate: 1, from, to, error: 'API unavailable' },
-            });
-        }
-
-        const apiData = await response.json();
-        const rate = apiData.rates[to];
-
-        // Update cache
+        // 1. Check existing cache
         const existingCache = await db
             .select()
             .from(exchangeRates)
@@ -72,27 +35,111 @@ export async function GET(request: NextRequest) {
             )
             .limit(1);
 
-        if (existingCache.length > 0) {
-            await db
-                .update(exchangeRates)
-                .set({ rate, fetchedAt: new Date().toISOString() })
-                .where(eq(exchangeRates.id, existingCache[0].id));
-        } else {
-            await db.insert(exchangeRates).values({
-                id: uuid(),
-                baseCurrency: from,
-                targetCurrency: to,
-                rate,
-                date: today,
+        const cachedRow = existingCache[0];
+
+        if (!forceRefresh && cachedRow) {
+            const cacheAge = differenceInMinutes(new Date(), new Date(cachedRow.fetchedAt!));
+            // Use cache if less than 15 minutes old
+            if (cacheAge < 15) {
+                return NextResponse.json({
+                    data: { rate: cachedRow.rate, from, to, cached: true, source: 'cache_fresh' },
+                });
+            }
+        }
+
+        let newRate: number | null = null;
+        let source = '';
+
+        // 2. Try Frankfurter API
+        try {
+            const response = await fetch(`${FRANKFURTER_API}/latest?from=${from}&to=${to}`, {
+                signal: AbortSignal.timeout(5000) // 5s timeout
+            });
+
+            if (response.ok) {
+                const apiData = await response.json();
+                newRate = apiData.rates[to];
+                source = 'frankfurter';
+            }
+        } catch (e) {
+            console.warn('Frankfurter API failed:', e);
+        }
+
+        // 3. If Frankfurter failed, Try LLM (DeepSeek)
+        if (!newRate && process.env.DEEPSEEK_API_KEY) {
+            try {
+                console.log(`[Exchange] Falling back to DeepSeek for ${from}->${to}`);
+                const deepseek = new OpenAI({
+                    apiKey: process.env.DEEPSEEK_API_KEY,
+                    baseURL: 'https://api.deepseek.com/v1',
+                });
+
+                const completion = await deepseek.chat.completions.create({
+                    model: 'deepseek-chat',
+                    messages: [
+                        {
+                            role: 'system',
+                            content: `You are an expert currency exchange rate assistant. Provide the current exchange rate for ${from} to ${to} as of today (${today}). Return JSON: { "rate": <number> }. CRITICAL: Rate must be exact number.`
+                        },
+                        {
+                            role: 'user',
+                            content: `1 ${from} = ? ${to}`
+                        }
+                    ],
+                    response_format: { type: 'json_object' },
+                    temperature: 0.1,
+                    max_tokens: 100,
+                });
+
+                const parsed = JSON.parse(completion.choices[0].message.content || '{}');
+                const llmRate = parseFloat(parsed.rate);
+                if (!isNaN(llmRate) && llmRate > 0) {
+                    newRate = llmRate;
+                    source = 'llm_deepseek';
+                }
+            } catch (e) {
+                console.error('LLM Fallback failed:', e);
+            }
+        }
+
+        // 4. Update Cache or Use Stale
+        if (newRate) {
+            // We have a fresh rate (from API or LLM) -> Save it
+            if (cachedRow) {
+                await db
+                    .update(exchangeRates)
+                    .set({ rate: newRate, fetchedAt: new Date().toISOString() })
+                    .where(eq(exchangeRates.id, cachedRow.id));
+            } else {
+                await db.insert(exchangeRates).values({
+                    id: uuid(),
+                    baseCurrency: from,
+                    targetCurrency: to,
+                    rate: newRate,
+                    date: today,
+                    fetchedAt: new Date().toISOString(),
+                });
+            }
+            return NextResponse.json({ data: { rate: newRate, from, to, cached: false, source } });
+
+        } else if (cachedRow) {
+            // 5. If everything failed but we have STALE cache, use it
+            console.warn('Using stale cache for', from, to);
+            return NextResponse.json({
+                data: { rate: cachedRow.rate, from, to, cached: true, source: 'cache_stale' },
             });
         }
 
-        return NextResponse.json({ data: { rate, from, to, cached: false } });
+        // 6. Complete Failure
+        return NextResponse.json({
+            data: { rate: 1, from, to, error: 'All rate sources failed' },
+        });
+
     } catch (error) {
         console.error('Error fetching exchange rate:', error);
         return NextResponse.json(
             { data: { rate: 1, error: 'Failed to fetch rate' } },
-            { status: 200 } // Return 200 with fallback rate
+            { status: 200 }
         );
     }
 }

@@ -16,8 +16,6 @@ export const CURRENCIES = {
     EUR: { code: 'EUR', symbol: '€', name: 'Euro', decimals: 2 },
     GBP: { code: 'GBP', symbol: '£', name: 'British Pound', decimals: 2 },
     JPY: { code: 'JPY', symbol: '¥', name: 'Japanese Yen', decimals: 0 },
-    SGD: { code: 'SGD', symbol: 'S$', name: 'Singapore Dollar', decimals: 2 },
-    MYR: { code: 'MYR', symbol: 'RM', name: 'Malaysian Ringgit', decimals: 2 },
     AUD: { code: 'AUD', symbol: 'A$', name: 'Australian Dollar', decimals: 2 },
     CNY: { code: 'CNY', symbol: '¥', name: 'Chinese Yuan', decimals: 2 },
     KRW: { code: 'KRW', symbol: '₩', name: 'South Korean Won', decimals: 0 },

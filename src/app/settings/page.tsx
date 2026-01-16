@@ -148,6 +148,56 @@ export default function SettingsPage() {
         }
     };
 
+    const handleSyncRates = async () => {
+        setCurrencyLoading(true); // Using same loading state for simplicity, or could add specific syncLoading
+        try {
+            // First fetch available currencies to know what to sync
+            // We know our target is IDR for now as per system default
+            const currenciesToSync = Object.keys(CURRENCIES).filter(c => c !== 'IDR').slice(0, 6);
+
+            // We'll fetch rates against IDR one by one or batch if API supports it. 
+            // Our internal API /api/exchange-rates?from=X&to=IDR works.
+
+            const newRates: Record<string, Record<string, number>> = { ...customRates };
+
+            await Promise.all(currenciesToSync.map(async (currency) => {
+                try {
+                    const res = await fetch(`/api/exchange-rates?from=${currency}&to=IDR`);
+                    const data = await res.json();
+                    if (data.rate) {
+                        if (!newRates[currency]) newRates[currency] = {};
+                        newRates[currency]['IDR'] = data.rate;
+                    }
+                } catch (e) {
+                    console.error(`Failed to sync ${currency}:`, e);
+                }
+            }));
+
+            setCustomRates(newRates);
+            // Auto save after sync? User said "only refresh/refetch when pressed", implies updating the *inputs*. 
+            // The inputs are bound to customRates. 
+            // We should probably let them save manually or auto-save via the existing effect.
+            // Our existing effect auto-saves when `customRates` changes if fallbackOrder > 0.
+            // ACTUALLY, the existing auto-save effect only watches [fallbackOrder, enabledMethods]!
+            // So we might need to manually trigger save or add customRates to the dependency array.
+            // Adding customRates to the auto-save effect might be good, OR just save explicitly here.
+            // Let's safe explicitly here to be sure.
+
+            await fetch('/api/settings/currency', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fallbackOrder, enabledMethods, customRates: newRates }),
+            });
+            setCurrencySaved(true);
+            setTimeout(() => setCurrencySaved(false), 2000);
+
+        } catch (error) {
+            console.error('Failed to sync rates:', error);
+        } finally {
+            setCurrencyLoading(false);
+        }
+    };
+
     const moveMethod = (index: number, direction: 'up' | 'down') => {
         const newOrder = [...fallbackOrder];
         const newIndex = direction === 'up' ? index - 1 : index + 1;
@@ -503,8 +553,13 @@ export default function SettingsPage() {
                     <div className="glass-card rounded-2xl p-6">
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-lg font-semibold text-white">Custom Fallback Rates</h2>
-                            <button className="px-3 py-1.5 text-sm border border-gray-700 rounded-lg text-gray-300 hover:bg-gray-800 transition-colors">
-                                Reset to Defaults
+                            <button
+                                onClick={handleSyncRates}
+                                disabled={currencyLoading}
+                                className="px-3 py-1.5 text-sm border border-blue-500/30 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-colors flex items-center gap-2"
+                            >
+                                <Globe className={cn("w-3.5 h-3.5", currencyLoading ? "animate-spin" : "")} />
+                                {currencyLoading ? 'Syncing...' : 'Sync with Live Rates'}
                             </button>
                         </div>
                         <p className="text-sm text-gray-400 mb-6">
@@ -512,19 +567,33 @@ export default function SettingsPage() {
                         </p>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {Object.keys(CURRENCIES).slice(0, 6).map((currency) => (
-                                <div key={currency} className="flex items-center gap-3 p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
-                                    <span className="text-sm font-mono text-gray-400 w-12">{currency}</span>
-                                    <span className="text-gray-600">→</span>
-                                    <span className="text-sm font-mono text-gray-400 w-12">IDR</span>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="16850.00"
-                                        className="flex-1 px-3 py-2 bg-gray-900/50 border border-gray-700 rounded-lg text-white text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    />
-                                </div>
-                            ))}
+                            {Object.keys(CURRENCIES)
+                                .filter(c => c !== 'IDR')
+                                .slice(0, 6)
+                                .map((currency) => (
+                                    <div key={currency} className="flex items-center gap-3 p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
+                                        <div className="flex items-center gap-2 min-w-[3rem]">
+                                            <span className="text-sm font-bold text-white">{currency}</span>
+                                        </div>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            placeholder=""
+                                            value={customRates[currency]?.['IDR'] || ''}
+                                            onChange={(e) => {
+                                                const val = parseFloat(e.target.value);
+                                                setCustomRates(prev => ({
+                                                    ...prev,
+                                                    [currency]: {
+                                                        ...prev[currency],
+                                                        'IDR': isNaN(val) ? 0 : val
+                                                    }
+                                                }));
+                                            }}
+                                            className="flex-1 min-w-0 px-3 py-2 bg-gray-900/50 border border-gray-700 rounded-lg text-white text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        />
+                                    </div>
+                                ))}
                         </div>
 
                         <button className="mt-4 w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 transition font-medium">
