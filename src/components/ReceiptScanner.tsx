@@ -97,7 +97,12 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
             alert(`Skipped ${ignoredFiles.length} duplicate file(s) (already exists):\n${ignoredFiles.join('\n')}`);
         }
 
-        if (uniqueFiles.length === 0) return;
+        // If all files were duplicates, cleanup and return
+        if (uniqueFiles.length === 0) {
+            setIsProcessing(false);
+            setUploadProgress([]);
+            return;
+        }
 
         setIsProcessing(true);
         // If not in auto mode, prepare for review. In auto mode, we stay on the screen.
@@ -263,14 +268,13 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
 
         // Batch complete notification
         if (isAutoMode) {
-            onBatchComplete?.(); // Refresh list after auto-save
+            onBatchComplete?.(); // Auto mode: refresh immediately after saving
             setResults([]);
         } else if (newResults.length > 0) {
-            // Manual mode - open review modal
+            // Manual mode: open review modal
+            // onBatchComplete will be called after user finishes reviewing (in handleSaveAndNext/handleSkip)
             setIsReviewMode(true);
             setCurrentIndex(0);
-            // Also refresh list so manually saved items show up
-            onBatchComplete?.();
         }
     }, [results.length, useEnhancement, isAutoMode, onCreateTransaction, onBatchComplete, processedSignatures]);
 
@@ -318,7 +322,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
         const result = completedResults[currentIndex];
         if (!result || !result.editedAmount) return;
 
-        onCreateTransaction?.(result);
+        await onCreateTransaction?.(result); // Wait for save to complete
 
         // Advance to next receipt if available
         // Note: completedResults is derived from results state.
@@ -326,10 +330,12 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
         if (currentIndex < completedResults.length - 1) {
             setCurrentIndex(currentIndex + 1);
         } else {
-            // Last item
+            // Last item - wait a bit for database to settle before refreshing
             setIsReviewMode(false);
             setResults([]);
-            onBatchComplete?.();
+            setTimeout(() => {
+                onBatchComplete?.();
+            }, 100); // Small delay to ensure DB writes complete
         }
     };
 
@@ -344,7 +350,9 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
         } else {
             setIsReviewMode(false);
             setResults([]);
-            onBatchComplete?.();
+            setTimeout(() => {
+                onBatchComplete?.();
+            }, 100); // Small delay to ensure DB writes complete
         }
     };
 
