@@ -164,9 +164,9 @@ export default function SettingsPage() {
                 try {
                     const res = await fetch(`/api/exchange-rates?from=${currency}&to=IDR`);
                     const data = await res.json();
-                    if (data.rate) {
+                    if (data.data?.rate) {
                         if (!newRates[currency]) newRates[currency] = {};
-                        newRates[currency]['IDR'] = data.rate;
+                        newRates[currency]['IDR'] = data.data.rate;
                     }
                 } catch (e) {
                     console.error(`Failed to sync ${currency}:`, e);
