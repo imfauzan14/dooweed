@@ -140,7 +140,7 @@ export function StatCard({ label, value, change, changeType = 'neutral', icon }:
             <div className="flex items-start justify-between">
                 <div>
                     <p className="text-sm text-gray-400">{label}</p>
-                    <p className="text-2xl sm:text-3xl font-bold text-white mt-1">{value}</p>
+                    <p className="text-xl sm:text-2xl font-bold text-white mt-1 break-words">{value}</p>
                     {change && (
                         <p
                             className={cn(

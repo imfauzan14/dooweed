@@ -17,7 +17,7 @@ interface Category {
 
 interface Budget {
     id: string;
-    categoryId: string;
+    categoryId: string | null; // null = universal budget
     amount: number;
     currency: string;
     period: 'weekly' | 'monthly' | 'yearly';
@@ -25,7 +25,7 @@ interface Budget {
     remaining: number;
     percentUsed: number;
     isOverBudget: boolean;
-    category: {
+    category?: {
         name: string;
         icon: string;
         color: string;
@@ -38,10 +38,12 @@ export default function BudgetsPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
+    const [isUniversalMode, setIsUniversalMode] = useState(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     // Form state
     const [formData, setFormData] = useState<{
-        categoryId: string;
+        categoryId: string | null;
         amount: string;
         period: 'weekly' | 'monthly' | 'yearly';
     }>({
@@ -78,6 +80,7 @@ export default function BudgetsPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setErrorMessage(null);
 
         try {
             const url = editingBudget ? '/api/budgets' : '/api/budgets';
@@ -88,7 +91,7 @@ export default function BudgetsPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...(editingBudget && { id: editingBudget.id }),
-                    categoryId: formData.categoryId,
+                    categoryId: isUniversalMode ? null : formData.categoryId,
                     amount: parseFloat(formData.amount),
                     period: formData.period,
                 }),
@@ -98,10 +101,15 @@ export default function BudgetsPage() {
                 setShowModal(false);
                 setEditingBudget(null);
                 setFormData({ categoryId: '', amount: '', period: 'monthly' });
+                setIsUniversalMode(false);
                 fetchData();
+            } else {
+                const errorData = await response.json();
+                setErrorMessage(errorData.error || 'Failed to save budget');
             }
         } catch (error) {
             console.error('Failed to save budget:', error);
+            setErrorMessage('An unexpected error occurred');
         }
     };
 
@@ -120,6 +128,7 @@ export default function BudgetsPage() {
 
     const openEditModal = (budget: Budget) => {
         setEditingBudget(budget);
+        setIsUniversalMode(budget.categoryId === null);
         setFormData({
             categoryId: budget.categoryId,
             amount: budget.amount.toString(),
@@ -199,9 +208,9 @@ export default function BudgetsPage() {
                     {budgets.map((budget) => (
                         <div key={budget.id} className="relative">
                             <BudgetProgress
-                                categoryName={budget.category.name}
-                                categoryIcon={budget.category.icon}
-                                categoryColor={budget.category.color}
+                                categoryName={budget.category ? budget.category.name : 'Universal Budget'}
+                                categoryIcon={budget.category ? budget.category.icon : '🌐'}
+                                categoryColor={budget.category ? budget.category.color : 'blue'}
                                 budgetAmount={budget.amount}
                                 spentAmount={budget.spent}
                                 period={budget.period}
@@ -249,24 +258,85 @@ export default function BudgetsPage() {
                         </h2>
 
                         <form onSubmit={handleSubmit} className="space-y-4">
-                            {/* Category */}
-                            <div className="space-y-2">
-                                <label className="text-sm text-gray-400">Category</label>
-                                <select
-                                    value={formData.categoryId}
-                                    onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
-                                    disabled={!!editingBudget}
-                                    className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                                    required
+                            {/* Error Message */}
+                            {errorMessage && (
+                                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+                                    <p className="text-sm text-red-400">{errorMessage}</p>
+                                </div>
+                            )}
+
+                            {/* Universal Budget Toggle */}
+                            {!editingBudget && (
+                                <div
+                                    onClick={() => {
+                                        const newValue = !isUniversalMode;
+                                        setIsUniversalMode(newValue);
+                                        if (newValue) {
+                                            setFormData(prev => ({ ...prev, categoryId: null }));
+                                        } else {
+                                            setFormData(prev => ({ ...prev, categoryId: '' }));
+                                        }
+                                    }}
+                                    className={cn(
+                                        "p-4 rounded-xl border transition-all cursor-pointer flex items-center justify-between group",
+                                        isUniversalMode
+                                            ? "bg-blue-500/10 border-blue-500"
+                                            : "bg-gray-800/30 border-gray-700 hover:bg-gray-800/50"
+                                    )}
                                 >
-                                    <option value="">Select category</option>
-                                    {(editingBudget ? categories : categoriesWithoutBudget).map((c) => (
-                                        <option key={c.id} value={c.id}>
-                                            {c.icon} {c.name}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
+                                    <div className="flex items-center gap-3">
+                                        <div className={cn(
+                                            "w-10 h-10 rounded-full flex items-center justify-center text-xl transition-colors",
+                                            isUniversalMode ? "bg-blue-500/20 text-blue-400" : "bg-gray-700 text-gray-400"
+                                        )}>
+                                            🌐
+                                        </div>
+                                        <div>
+                                            <span className={cn(
+                                                "text-sm font-bold block",
+                                                isUniversalMode ? "text-blue-400" : "text-white"
+                                            )}>
+                                                Universal Budget
+                                            </span>
+                                            <p className="text-xs text-gray-400 mt-0.5">
+                                                Track all expenses across all categories
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Toggle Switch Visual */}
+                                    <div className={cn(
+                                        "w-12 h-6 rounded-full p-1 transition-colors relative",
+                                        isUniversalMode ? "bg-blue-500" : "bg-gray-700"
+                                    )}>
+                                        <div className={cn(
+                                            "w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ease-out",
+                                            isUniversalMode ? "translate-x-6" : "translate-x-0"
+                                        )} />
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Category */}
+                            {!isUniversalMode && (
+                                <div className="space-y-2">
+                                    <label className="text-sm text-gray-400">Category</label>
+                                    <select
+                                        value={formData.categoryId || ''}
+                                        onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
+                                        disabled={!!editingBudget}
+                                        className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                                        required
+                                    >
+                                        <option value="">Select category</option>
+                                        {(editingBudget ? categories : categoriesWithoutBudget).map((c) => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.icon} {c.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
 
                             {/* Amount */}
                             <div className="space-y-2">

@@ -3,7 +3,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
     Upload, X, Check, AlertCircle, Loader2, Image as ImageIcon,
-    ChevronLeft, ChevronRight, Save, Trash2, ArrowDownRight, ArrowUpRight
+    ChevronLeft, ChevronRight, Save, Trash2, ArrowDownRight, ArrowUpRight,
+    Zap, Eye
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { extractReceiptData, compressImage, type OCRResult } from '@/lib/ocr';
@@ -33,6 +34,7 @@ interface ScanResult extends OCRResult {
     editedDate?: string;
     editedMerchant?: string;
     editedCategoryId?: string;
+    isAutomated?: boolean;
 }
 
 interface ReceiptScannerProps {
@@ -42,6 +44,13 @@ interface ReceiptScannerProps {
     categories?: Category[];
 }
 
+interface UploadProgress {
+    filename: string;
+    status: 'waiting' | 'processing' | 'complete' | 'error';
+    progress: number; // 0-100
+    currentStep?: string;
+}
+
 export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, categories = [] }: ReceiptScannerProps) {
     const [isDragging, setIsDragging] = useState(false);
     const [results, setResults] = useState<ScanResult[]>([]);
@@ -49,6 +58,8 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isReviewMode, setIsReviewMode] = useState(false);
     const [useEnhancement, setUseEnhancement] = useState(true); // DeepSeek enhancement toggle
+    const [isAutoMode, setIsAutoMode] = useState(false); // New Auto Mode toggle
+    const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const completedResults = results.filter(r => r.status === 'completed');
@@ -57,9 +68,21 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
         if (files.length === 0) return;
 
         setIsProcessing(true);
-        setIsReviewMode(false);
+        // If not in auto mode, prepare for review. In auto mode, we stay on the screen.
+        if (!isAutoMode) {
+            setIsReviewMode(false);
+        }
+
         const newResults: ScanResult[] = [];
         const startIndex = results.length;
+
+        // Initialize progress tracking
+        const initialProgress: UploadProgress[] = files.map((file) => ({
+            filename: file.name,
+            status: 'waiting' as const,
+            progress: 0,
+        }));
+        setUploadProgress(initialProgress);
 
         const processingResults: ScanResult[] = files.map(() => ({
             imageBase64: '',
@@ -82,11 +105,29 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
 
             const index = startIndex + i;
 
-            try {
-                const compressedImage = await compressImage(file);
+            // Update to processing
+            setUploadProgress(prev => {
+                const updated = [...prev];
+                updated[i] = { ...updated[i], status: 'processing', progress: 10 };
+                return updated;
+            });
 
-                // Step 1: Always run Tesseract client-side
+            try {
+                // Compress image - 30% progress
+                const compressedImage = await compressImage(file);
+                setUploadProgress(prev => {
+                    const updated = [...prev];
+                    updated[i] = { ...updated[i], progress: 30, currentStep: 'Compressed' };
+                    return updated;
+                });
+
+                // Step 1: Always run Tesseract client-side - 50% progress
                 const tesseractResult = await extractReceiptData(compressedImage);
+                setUploadProgress(prev => {
+                    const updated = [...prev];
+                    updated[i] = { ...updated[i], progress: 50, currentStep: 'OCR complete' };
+                    return updated;
+                });
 
                 // Step 2: If enhancement enabled, send raw text to DeepSeek API
                 let ocrResult: OCRResult & EnhancedOCRResult = tesseractResult;
@@ -114,6 +155,11 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                                 enhancementUsed: true,
                             };
                             console.log('[ReceiptScanner] ✅ DeepSeek enhancement used');
+                            setUploadProgress(prev => {
+                                const updated = [...prev];
+                                updated[i] = { ...updated[i], progress: 80, currentStep: 'AI enhanced' };
+                                return updated;
+                            });
                         } else {
                             throw new Error('API returned error');
                         }
@@ -122,14 +168,21 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                         ocrResult = { ...tesseractResult, enhancementUsed: false };
                     }
                 }
+
+                const merchantName = ocrResult.merchant || '';
+                // In Auto Mode, we append [AUTOMATED] to the merchant name so it's tagged visible
+                // and we also rely on isAutomated flag if parent uses it.
+                const finalMerchantName = merchantName;
+
                 const completedResult: ScanResult = {
                     ...ocrResult,
                     imageBase64: compressedImage,
                     status: 'completed',
                     editedType: ocrResult.transactionType || 'expense',
-                    editedAmount: ocrResult.amount || undefined,
-                    editedDate: ocrResult.date || format(new Date(), 'yyyy-MM-dd'),
-                    editedMerchant: ocrResult.merchant || '',
+                    editedAmount: ocrResult.amount ? Math.abs(ocrResult.amount) : undefined,
+                    editedDate: (ocrResult.date && /^\d{4}-\d{2}-\d{2}$/.test(ocrResult.date)) ? ocrResult.date : format(new Date(), 'yyyy-MM-dd'),
+                    editedMerchant: finalMerchantName,
+                    isAutomated: isAutoMode,
                 };
 
                 setResults(prev => {
@@ -139,6 +192,18 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                 });
 
                 newResults.push(completedResult);
+
+                // In Auto Mode, save immediately
+                if (isAutoMode) {
+                    onCreateTransaction?.(completedResult);
+                }
+
+                // Mark as complete
+                setUploadProgress(prev => {
+                    const updated = [...prev];
+                    updated[i] = { ...updated[i], status: 'complete', progress: 100 };
+                    return updated;
+                });
             } catch (error) {
                 setResults(prev => {
                     const updated = [...prev];
@@ -149,16 +214,33 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                     };
                     return updated;
                 });
+
+                // Mark as error
+                setUploadProgress(prev => {
+                    const updated = [...prev];
+                    updated[i] = { ...updated[i], status: 'error', progress: 0 };
+                    return updated;
+                });
             }
         }
 
         setIsProcessing(false);
 
-        if (newResults.length > 0) {
+        // Clear progress after 3 seconds
+        setTimeout(() => {
+            setUploadProgress([]);
+        }, 3000);
+
+        // If NOT in auto mode and we have new results, open review
+        if (!isAutoMode && newResults.length > 0) {
             setIsReviewMode(true);
             setCurrentIndex(0);
+        } else if (isAutoMode) {
+            // In auto mode, we just clear results after processing because they are saved.
+            // We keep them in result state briefly during processing but clear now to avoid review modal logic.
+            setResults([]);
         }
-    }, [results.length]);
+    }, [results.length, useEnhancement, isAutoMode, onCreateTransaction]);
 
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -206,9 +288,13 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
 
         onCreateTransaction?.(result);
 
+        // Advance to next receipt if available
+        // Note: completedResults is derived from results state.
+        // We're iterating through them.
         if (currentIndex < completedResults.length - 1) {
             setCurrentIndex(currentIndex + 1);
         } else {
+            // Last item
             setIsReviewMode(false);
             setResults([]);
         }
@@ -249,12 +335,11 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                     onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                     onDragLeave={() => setIsDragging(false)}
                     onDrop={handleDrop}
-                    onClick={() => fileInputRef.current?.click()}
                     className={cn(
-                        'relative border-2 border-dashed rounded-2xl p-6 md:p-8 text-center cursor-pointer transition-all',
+                        'relative border-2 border-dashed rounded-2xl p-6 md:p-8 text-center transition-all bg-gray-800/30',
                         isDragging
                             ? 'border-blue-500 bg-blue-500/10'
-                            : 'border-gray-700 hover:border-gray-600 bg-gray-800/30'
+                            : 'border-gray-700 hover:border-gray-600'
                     )}
                 >
                     <input
@@ -265,30 +350,71 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                         onChange={handleFileChange}
                         className="hidden"
                     />
-                    <div className="flex flex-col items-center gap-3 md:gap-4">
+
+                    <div className="flex flex-col items-center gap-3 md:gap-4 pointer-events-none">
                         <div className={cn('p-3 md:p-4 rounded-full transition-colors', isDragging ? 'bg-blue-500/20' : 'bg-gray-700/50')}>
                             <Upload className={cn('w-6 h-6 md:w-8 md:h-8', isDragging ? 'text-blue-400' : 'text-gray-400')} />
                         </div>
                         <div>
                             <h3 className="text-base md:text-lg font-bold text-white">
-                                Drop receipts here or click to browse
+                                Drop receipts here
                             </h3>
                             <p className="text-xs md:text-sm text-gray-400 mt-1">
-                                Supports JPG, PNG, WebP (max 10MB
-                                each)
+                                Supports JPG, PNG, WebP (max 10MB)
                             </p>
-                            <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500">
-                                <input
-                                    type="checkbox"
-                                    id="useEnhancement"
-                                    checked={useEnhancement}
-                                    onChange={(e) => setUseEnhancement(e.target.checked)}
-                                    className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-800"
-                                />
-                                <label htmlFor="useEnhancement" className="cursor-pointer select-none">
-                                    ✨ Use AI Enhancement (DeepSeek) - Better accuracy
-                                </label>
+                        </div>
+                    </div>
+
+                    {/* Controls */}
+                    <div className="mt-8 flex flex-col md:flex-row items-center justify-center gap-6 relative z-10 w-full max-w-2xl mx-auto">
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-500/25 transition-all hover:scale-105 active:scale-95 w-full md:w-auto"
+                        >
+                            Browse Files
+                        </button>
+
+                        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                            {/* Mode Toggle */}
+                            <div className="flex bg-gray-800/50 p-1 rounded-xl border border-gray-700/50 backdrop-blur-sm">
+                                <button
+                                    onClick={() => setIsAutoMode(false)}
+                                    className={cn(
+                                        "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2",
+                                        !isAutoMode
+                                            ? "bg-gray-700 text-white shadow-md"
+                                            : "text-gray-400 hover:text-white"
+                                    )}
+                                >
+                                    <Eye className="w-4 h-4" />
+                                    Manual Review
+                                </button>
+                                <button
+                                    onClick={() => setIsAutoMode(true)}
+                                    className={cn(
+                                        "flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2",
+                                        isAutoMode
+                                            ? "bg-green-500 text-white shadow-md shadow-green-500/20"
+                                            : "text-gray-400 hover:text-white"
+                                    )}
+                                >
+                                    <Zap className="w-4 h-4" />
+                                    Auto Pilot
+                                </button>
                             </div>
+
+                            {/* Enhancement Toggle */}
+                            <button
+                                onClick={() => setUseEnhancement(!useEnhancement)}
+                                className={cn(
+                                    "px-4 py-2 rounded-xl border text-sm font-medium transition-all flex items-center justify-center gap-2",
+                                    useEnhancement
+                                        ? "bg-purple-500/10 border-purple-500 text-purple-400"
+                                        : "bg-gray-800/50 border-gray-700 text-gray-400 hover:border-gray-600"
+                                )}
+                            >
+                                <span>✨ AI Enhanced</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -298,7 +424,41 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
             {isProcessing && (
                 <div className="flex items-center justify-center gap-3 py-8">
                     <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
-                    <span className="text-gray-400">Processing receipts...</span>
+                    <span className="text-gray-400">
+                        {isAutoMode ? "Processing & Saving..." : "Processing receipts..."}
+                    </span>
+                </div>
+            )}
+
+            {/* Upload Progress Indicator */}
+            {uploadProgress.length > 0 && (
+                <div className="fixed bottom-4 right-4 bg-gray-900 border border-gray-700 rounded-xl p-4 shadow-2xl max-w-sm z-50 animate-in slide-in-from-bottom-4">
+                    <h3 className="font-bold text-sm mb-3 text-white">
+                        {isAutoMode ? "Auto-Processing" : "Processing"} {uploadProgress.length} receipt{uploadProgress.length > 1 ? 's' : ''}
+                    </h3>
+
+                    <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                        {uploadProgress.map((item, idx) => (
+                            <div key={idx} className="space-y-1">
+                                <div className="flex items-center gap-2 text-xs">
+                                    {item.status === 'complete' && <Check className="w-3 h-3 text-green-400 flex-shrink-0" />}
+                                    {item.status === 'processing' && <Loader2 className="w-3 h-3 animate-spin text-blue-400 flex-shrink-0" />}
+                                    {item.status === 'error' && <AlertCircle className="w-3 h-3 text-red-400 flex-shrink-0" />}
+                                    {item.status === 'waiting' && <div className="w-3 h-3 rounded-full bg-gray-600 flex-shrink-0" />}
+                                    <span className="truncate text-gray-300 flex-1">{item.filename}</span>
+                                    {item.currentStep && <span className="text-gray-500 text-[10px]">{item.currentStep}</span>}
+                                </div>
+                                {item.status === 'processing' && (
+                                    <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
+                                            style={{ width: `${item.progress}%` }}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
 
@@ -310,10 +470,15 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                         {/* Header */}
                         <div className="flex items-center justify-between p-4 border-b border-gray-800">
                             <div>
-                                <h3 className="text-lg font-bold text-white">Review Receipt</h3>
-                                <p className="text-xs text-gray-400">
-                                    {currentIndex + 1} of {completedResults.length} scanned
-                                </p>
+                                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                    Review Receipt
+                                    {completedResults.length > 1 && (
+                                        <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full font-normal">
+                                            {currentIndex + 1}/{completedResults.length}
+                                        </span>
+                                    )}
+                                </h3>
+
                             </div>
                             <div className="flex items-center gap-2">
                                 {completedResults.length > 1 && (
@@ -358,16 +523,6 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                                         <ImageIcon className="w-12 h-12" />
                                     </div>
                                 )}
-                                {/* Confidence Badge Overlay */}
-                                <div className="absolute top-2 right-2">
-                                    <span className={cn(
-                                        'px-2 py-1 rounded-lg text-xs font-bold shadow-lg backdrop-blur-md',
-                                        currentResult.confidence > 0.7 ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                            currentResult.confidence > 0.4 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
-                                    )}>
-                                        {Math.round(currentResult.confidence * 100)}% Conf.
-                                    </span>
-                                </div>
                             </div>
 
                             {/* Form */}
@@ -402,12 +557,12 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                                 </div>
 
                                 <div>
-                                    <label className="text-sm font-medium text-gray-400 mb-1 block">Amount</label>
+                                    <label className="text-xs sm:text-sm font-medium text-gray-400 mb-1 block">Amount</label>
                                     <div className="flex gap-2">
                                         <select
                                             value={currentResult.currency || 'IDR'}
                                             onChange={(e) => updateResult(results.indexOf(currentResult), { currency: e.target.value })}
-                                            className="px-3 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-white outline-none focus:border-blue-500"
+                                            className="px-3 py-2.5 sm:py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-sm sm:text-base text-white outline-none focus:border-blue-500"
                                         >
                                             {Object.keys(CURRENCIES).map((code) => (
                                                 <option key={code} value={code}>{code}</option>
@@ -418,36 +573,50 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                                             step="0.01"
                                             value={currentResult.editedAmount || ''}
                                             onChange={(e) => updateResult(results.indexOf(currentResult), { editedAmount: parseFloat(e.target.value) || undefined })}
-                                            className="flex-1 px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-white outline-none focus:border-blue-500 text-lg font-bold"
+                                            className="flex-1 px-3 sm:px-4 py-2.5 sm:py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-white outline-none focus:border-blue-500 text-base sm:text-lg font-bold"
                                             placeholder="0.00"
                                         />
                                     </div>
                                 </div>
 
                                 <div>
-                                    <label className="text-sm font-medium text-gray-400 mb-1 block">Date</label>
+                                    <label className="text-xs sm:text-sm font-medium text-gray-400 mb-1 block">Date</label>
                                     <input
                                         type="date"
                                         value={currentResult.editedDate || ''}
                                         onChange={(e) => updateResult(results.indexOf(currentResult), { editedDate: e.target.value })}
-                                        className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-white outline-none focus:border-blue-500"
+                                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-sm sm:text-base text-white outline-none focus:border-blue-500"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="text-sm font-medium text-gray-400 mb-1 block">Merchant</label>
+                                    <label className="text-xs sm:text-sm font-medium text-gray-400 mb-1 block">Merchant</label>
                                     <input
                                         type="text"
                                         value={currentResult.editedMerchant || ''}
                                         onChange={(e) => updateResult(results.indexOf(currentResult), { editedMerchant: e.target.value })}
-                                        className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-white outline-none focus:border-blue-500"
+                                        className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-sm sm:text-base text-white outline-none focus:border-blue-500"
                                         placeholder="Merchant name"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="text-sm font-medium text-gray-400 mb-1 block">Category</label>
+                                    <label className="text-xs sm:text-sm font-medium text-gray-400 mb-1 block">Category (Optional)</label>
                                     <div className="grid grid-cols-4 sm:grid-cols-4 gap-2">
+                                        {/* Uncategorized option */}
+                                        <button
+                                            type="button"
+                                            onClick={() => updateResult(results.indexOf(currentResult), { editedCategoryId: undefined })}
+                                            className={cn(
+                                                'flex flex-col items-center gap-1 p-2 rounded-xl transition-all',
+                                                !currentResult.editedCategoryId
+                                                    ? 'bg-gray-600 text-white shadow-lg'
+                                                    : 'bg-gray-800/50 text-gray-400 hover:bg-gray-800'
+                                            )}
+                                        >
+                                            <span className="text-lg">∅</span>
+                                            <span className="text-[10px] font-medium">None</span>
+                                        </button>
                                         {filteredCategories.map((cat) => (
                                             <button
                                                 key={cat.id}
@@ -461,7 +630,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                                                 )}
                                             >
                                                 <span className="text-xl">{cat.icon}</span>
-                                                <span className="text-[10px] truncate w-full text-center">{cat.name}</span>
+                                                <span className="text-[10px] line-clamp-2 w-full text-center">{cat.name}</span>
                                             </button>
                                         ))}
                                     </div>
@@ -487,16 +656,16 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                                 </button>
                                 <button
                                     onClick={handleSaveAndNext}
-                                    disabled={!currentResult.editedAmount || !currentResult.editedCategoryId}
+                                    disabled={!currentResult.editedAmount}
                                     className={cn(
                                         'flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-2 text-sm shadow-lg transition-all',
-                                        currentResult.editedAmount && currentResult.editedCategoryId
+                                        currentResult.editedAmount
                                             ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white shadow-blue-500/25 hover:shadow-blue-500/40 hover:scale-[1.02] active:scale-[0.98]'
                                             : 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700'
                                     )}
                                 >
                                     <Check className="w-5 h-5" />
-                                    {currentIndex < completedResults.length - 1 ? 'Save & Next' : 'Finish Review'}
+                                    {currentIndex < completedResults.length - 1 ? 'Save & Next' : 'Save & Finish'}
                                 </button>
                             </div>
                         </div>

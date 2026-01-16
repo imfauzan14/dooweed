@@ -44,21 +44,27 @@ export async function GET() {
                         endDate = endOfMonth(now);
                 }
 
-                // Get spending for this category in the period
+                // Get spending for this budget period
+                // Universal budget (no categoryId) = sum ALL expenses
+                // Category budget = sum expenses for that category only
+                const whereConditions = [
+                    eq(transactions.userId, DEFAULT_USER_ID),
+                    eq(transactions.type, 'expense'),
+                    gte(transactions.date, format(startDate, 'yyyy-MM-dd')),
+                    lte(transactions.date, format(endDate, 'yyyy-MM-dd'))
+                ];
+
+                // Add category filter only for category budgets
+                if (budget.categoryId) {
+                    whereConditions.push(eq(transactions.categoryId, budget.categoryId));
+                }
+
                 const spending = await db
                     .select({
                         total: sql<number>`SUM(COALESCE(amount_in_base, amount))`,
                     })
                     .from(transactions)
-                    .where(
-                        and(
-                            eq(transactions.userId, DEFAULT_USER_ID),
-                            eq(transactions.type, 'expense'),
-                            eq(transactions.categoryId, budget.categoryId!),
-                            gte(transactions.date, format(startDate, 'yyyy-MM-dd')),
-                            lte(transactions.date, format(endDate, 'yyyy-MM-dd'))
-                        )
-                    );
+                    .where(and(...whereConditions));
 
                 const spent = spending[0]?.total || 0;
                 const remaining = Math.max(0, budget.amount - spent);
@@ -90,49 +96,79 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { categoryId, amount, currency = 'IDR', period } = body;
 
-        if (!categoryId || !amount || !period) {
+        if (!amount || !period) {
             return NextResponse.json(
-                { error: 'Missing required fields: categoryId, amount, period' },
+                { error: 'Missing required fields: amount, period' },
                 { status: 400 }
             );
         }
 
-        // Check if category exists
-        const categoryExists = await db
-            .select()
-            .from(categories)
-            .where(and(eq(categories.id, categoryId), eq(categories.userId, DEFAULT_USER_ID)))
-            .limit(1);
-
-        if (categoryExists.length === 0) {
-            return NextResponse.json({ error: 'Category not found' }, { status: 404 });
-        }
-
-        // Check if budget already exists for this category
-        const existingBudget = await db
+        // Get existing budgets to check for conflicts
+        const existingBudgets = await db
             .select()
             .from(budgets)
-            .where(
-                and(
-                    eq(budgets.userId, DEFAULT_USER_ID),
-                    eq(budgets.categoryId, categoryId),
-                    eq(budgets.period, period)
-                )
-            )
-            .limit(1);
+            .where(eq(budgets.userId, DEFAULT_USER_ID));
 
-        if (existingBudget.length > 0) {
-            return NextResponse.json(
-                { error: 'Budget already exists for this category and period' },
-                { status: 409 }
-            );
+        // RULE 1: If creating universal budget (no categoryId)
+        if (!categoryId) {
+            const hasCategoryBudgets = existingBudgets.some(b => b.categoryId !== null);
+            if (hasCategoryBudgets) {
+                return NextResponse.json({
+                    error: 'Cannot create universal budget while category budgets exist. Delete all category budgets first.',
+                    existingCategoryBudgets: existingBudgets.filter(b => b.categoryId).length
+                }, { status: 400 });
+            }
         }
 
+        // RULE 2: If creating category budget
+        if (categoryId) {
+            const hasUniversalBudget = existingBudgets.some(b => b.categoryId === null);
+            if (hasUniversalBudget) {
+                return NextResponse.json({
+                    error: 'Cannot create category budget while universal budget exists. Delete universal budget first.'
+                }, { status: 400 });
+            }
+        }
+
+        // Check if category exists (only if categoryId provided)
+        if (categoryId) {
+            const categoryExists = await db
+                .select()
+                .from(categories)
+                .where(and(eq(categories.id, categoryId), eq(categories.userId, DEFAULT_USER_ID)))
+                .limit(1);
+
+            if (categoryExists.length === 0) {
+                return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+            }
+
+            // Check if budget already exists for this category
+            const existingBudget = await db
+                .select()
+                .from(budgets)
+                .where(
+                    and(
+                        eq(budgets.userId, DEFAULT_USER_ID),
+                        eq(budgets.categoryId, categoryId),
+                        eq(budgets.period, period)
+                    )
+                )
+                .limit(1);
+
+            if (existingBudget.length > 0) {
+                return NextResponse.json(
+                    { error: 'Budget already exists for this category and period' },
+                    { status: 409 }
+                );
+            }
+        }
+
+        // Create the budget (works for both universal and category budgets)
         const id = uuid();
         const newBudget = {
             id,
             userId: DEFAULT_USER_ID,
-            categoryId,
+            categoryId: categoryId || null, // null for universal budget
             amount: parseFloat(amount),
             currency,
             period: period as 'weekly' | 'monthly' | 'yearly',

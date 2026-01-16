@@ -13,10 +13,74 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url);
         const type = searchParams.get('type') || 'summary';
         const months = parseInt(searchParams.get('months') || '6');
+        const monthParam = searchParams.get('month'); // YYYY-MM
+
+        if (type === 'available_months') {
+            const result = await db
+                .select({
+                    month: sql<string>`strftime('%Y-%m', date)`,
+                })
+                .from(transactions)
+                .where(eq(transactions.userId, DEFAULT_USER_ID))
+                .groupBy(sql`strftime('%Y-%m', date)`)
+                .orderBy(desc(sql`strftime('%Y-%m', date)`));
+
+            return NextResponse.json({ data: result.map(r => r.month) });
+        }
 
         const now = new Date();
-        const startDate = format(startOfMonth(subMonths(now, months - 1)), 'yyyy-MM-dd');
-        const endDate = format(endOfMonth(now), 'yyyy-MM-dd');
+        let startDate, endDate;
+
+        if (monthParam) {
+            startDate = `${monthParam}-01`;
+            // Calculate end date of the month
+            const [y, m] = monthParam.split('-').map(Number);
+            const nextMonth = new Date(y, m, 0); // Last day of the month
+            endDate = format(nextMonth, 'yyyy-MM-dd');
+        } else if (searchParams.get('startDate') && searchParams.get('endDate')) {
+            startDate = searchParams.get('startDate')!;
+            endDate = searchParams.get('endDate')!;
+        } else {
+            // Default behavior: last N months or 'all'
+            if (searchParams.get('months') === 'all') {
+                startDate = '2000-01-01'; // Far past
+                endDate = format(endOfMonth(now), 'yyyy-MM-dd');
+            } else {
+                startDate = format(startOfMonth(subMonths(now, months - 1)), 'yyyy-MM-dd');
+                endDate = format(endOfMonth(now), 'yyyy-MM-dd');
+            }
+        }
+
+        if (type === 'recent') {
+            const recentTransactions = await db
+                .select({
+                    id: transactions.id,
+                    type: transactions.type,
+                    amount: transactions.amount,
+                    amountInBase: transactions.amountInBase,
+                    currency: transactions.currency,
+                    description: transactions.description,
+                    date: transactions.date,
+                    receiptId: transactions.receiptId,
+                    categoryId: transactions.categoryId,
+                    categoryName: categories.name,
+                    categoryColor: categories.color,
+                    categoryIcon: categories.icon,
+                })
+                .from(transactions)
+                .leftJoin(categories, eq(transactions.categoryId, categories.id))
+                .where(
+                    and(
+                        eq(transactions.userId, DEFAULT_USER_ID),
+                        gte(transactions.date, startDate),
+                        lte(transactions.date, endDate)
+                    )
+                )
+                .orderBy(desc(transactions.date), desc(transactions.createdAt))
+                .limit(5);
+
+            return NextResponse.json({ data: recentTransactions });
+        }
 
         if (type === 'summary') {
             // Overall summary

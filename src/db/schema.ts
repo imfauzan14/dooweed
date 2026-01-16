@@ -72,7 +72,7 @@ export const transactions = sqliteTable('transactions', {
 export const budgets = sqliteTable('budgets', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id),
-  categoryId: text('category_id').references(() => categories.id),
+  categoryId: text('category_id').references(() => categories.id), // null = universal budget
   amount: real('amount').notNull(),
   currency: text('currency').default('IDR'),
   period: text('period', { enum: ['weekly', 'monthly', 'yearly'] }).notNull(),

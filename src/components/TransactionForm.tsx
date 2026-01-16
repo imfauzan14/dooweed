@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { CURRENCIES, CurrencyCode, formatCurrency } from '@/lib/currency';
-import { X, Calendar, DollarSign, Tag, FileText, RefreshCw } from 'lucide-react';
+import { X, Calendar, DollarSign, Tag, FileText, RefreshCw, Trash2 } from 'lucide-react';
 
 interface Category {
     id: string;
@@ -29,6 +29,7 @@ interface TransactionFormProps {
     categories: Category[];
     onSubmit: (data: TransactionFormData) => Promise<void>;
     onCancel: () => void;
+    onDelete?: () => Promise<void>;
     isLoading?: boolean;
 }
 
@@ -37,6 +38,7 @@ export function TransactionForm({
     categories,
     onSubmit,
     onCancel,
+    onDelete,
     isLoading,
 }: TransactionFormProps) {
     const [formData, setFormData] = useState<TransactionFormData>({
@@ -82,6 +84,12 @@ export function TransactionForm({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         await onSubmit(formData);
+    };
+
+    const handleDelete = async () => {
+        if (onDelete && confirm('Are you sure you want to delete this transaction?')) {
+            await onDelete();
+        }
     };
 
     const amountInIDR = exchangeRate && formData.amount
@@ -162,6 +170,21 @@ export function TransactionForm({
                     Category
                 </label>
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto">
+                    <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, categoryId: '' })}
+                        className={cn(
+                            'flex flex-col items-center gap-1 p-3 rounded-xl border transition-all',
+                            formData.categoryId === ''
+                                ? 'border-blue-500 bg-blue-500/20'
+                                : 'border-gray-700 hover:border-gray-600 bg-gray-800/30'
+                        )}
+                    >
+                        <span className="text-2xl">🚫</span>
+                        <span className="text-xs text-gray-300 truncate w-full text-center">
+                            None
+                        </span>
+                    </button>
                     {filteredCategories.map((cat) => (
                         <button
                             key={cat.id}
@@ -215,6 +238,16 @@ export function TransactionForm({
 
             {/* Actions */}
             <div className="flex gap-3 pt-4">
+                {initialData?.id && onDelete && (
+                    <button
+                        type="button"
+                        onClick={handleDelete}
+                        className="px-4 py-3 border border-red-900/50 text-red-500 hover:bg-red-900/20 rounded-xl transition-colors"
+                        title="Delete Transaction"
+                    >
+                        <Trash2 className="w-5 h-5" />
+                    </button>
+                )}
                 <button
                     type="button"
                     onClick={onCancel}
@@ -224,14 +257,14 @@ export function TransactionForm({
                 </button>
                 <button
                     type="submit"
-                    disabled={isLoading || !formData.amount || !formData.categoryId}
+                    disabled={isLoading || !formData.amount}
                     className={cn(
                         'flex-1 py-3 px-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2',
                         formData.type === 'expense'
                             ? 'bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600'
                             : 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600',
                         'text-white shadow-lg',
-                        (isLoading || !formData.amount || !formData.categoryId) && 'opacity-50 cursor-not-allowed'
+                        (isLoading || !formData.amount) && 'opacity-50 cursor-not-allowed'
                     )}
                 >
                     {isLoading && <RefreshCw className="w-4 h-4 animate-spin" />}

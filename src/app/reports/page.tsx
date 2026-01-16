@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { format } from 'date-fns';
 import { Download, Calendar, FileBarChart } from 'lucide-react';
 import { PageHeader, EmptyState } from '@/components/Navigation';
 import { MonthlyBarChart, BalanceTrendChart, ExpensePieChart, CategoryLegend } from '@/components/Charts';
@@ -26,19 +27,37 @@ export default function ReportsPage() {
     const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
     const [categoryData, setCategoryData] = useState<CategoryData[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [months, setMonths] = useState(6);
+    const [months, setMonths] = useState<number | 'all'>(6);
     const [activeTab, setActiveTab] = useState<'overview' | 'income' | 'expense'>('overview');
+    const [customRange, setCustomRange] = useState<{ start: string; end: string } | null>(null);
+    const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+
+    useEffect(() => {
+        // Fetch available months for range limits
+        fetch('/api/reports?type=available_months')
+            .then(res => res.json())
+            .then(data => {
+                if (data.data) setAvailableMonths(data.data);
+            });
+    }, []);
 
     useEffect(() => {
         fetchData();
-    }, [months]);
+    }, [months, customRange]);
 
     const fetchData = async () => {
         setIsLoading(true);
         try {
+            let query = '';
+            if (customRange) {
+                query = `startDate=${customRange.start}&endDate=${customRange.end}`;
+            } else {
+                query = `months=${months}`;
+            }
+
             const [monthlyRes, categoryRes] = await Promise.all([
-                fetch(`/api/reports?type=monthly&months=${months}`),
-                fetch(`/api/reports?type=category&months=${months}`),
+                fetch(`/api/reports?type=monthly&${query}`),
+                fetch(`/api/reports?type=category&${query}`),
             ]);
 
             const [monthlyResult, categoryResult] = await Promise.all([
@@ -56,7 +75,13 @@ export default function ReportsPage() {
     };
 
     const handleExport = () => {
-        window.open(`/api/reports?type=export&months=${months}`, '_blank');
+        let query = '';
+        if (customRange) {
+            query = `startDate=${customRange.start}&endDate=${customRange.end}`;
+        } else {
+            query = `months=${months}`;
+        }
+        window.open(`/api/reports?type=export&${query}`, '_blank');
     };
 
     // Calculate totals
@@ -116,21 +141,59 @@ export default function ReportsPage() {
             />
 
             {/* Period Selector */}
-            <div className="flex flex-wrap gap-2">
-                {[3, 6, 12].map((m) => (
-                    <button
-                        key={m}
-                        onClick={() => setMonths(m)}
-                        className={cn(
-                            'px-4 py-2 rounded-lg font-medium transition-colors',
-                            months === m
-                                ? 'bg-blue-500 text-white'
-                                : 'bg-gray-800 text-gray-400 hover:text-white'
-                        )}
+            <div className="flex flex-wrap items-center gap-2">
+                {/* Available Months Dropdown */}
+                <div className="relative">
+                    <select
+                        value={customRange ? 'custom' : (months === 0 ? 'all' : months.toString())}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === 'custom') {
+                                setCustomRange({ start: availableMonths[availableMonths.length - 1] + '-01', end: format(new Date(), 'yyyy-MM-dd') });
+                                setMonths(0);
+                            } else if (val === 'all') {
+                                setCustomRange(null);
+                                setMonths(0); // 0 represents 'all' internally for now, or use string logic
+                            } else {
+                                setCustomRange(null);
+                                setMonths(parseInt(val));
+                            }
+                        }}
+                        className="appearance-none bg-gray-800 border border-gray-700 text-white pl-4 pr-10 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                     >
-                        {m} months
-                    </button>
-                ))}
+                        <option value="3">Last 3 Months</option>
+                        <option value="6">Last 6 Months</option>
+                        <option value="12">Last 12 Months</option>
+                        <option value="all">All Time</option>
+                        <option value="custom">Custom Range</option>
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center px-3 pointer-events-none text-gray-400">
+                        <Calendar className="w-4 h-4" />
+                    </div>
+                </div>
+
+                {/* Custom Range Picker */}
+                {customRange && (
+                    <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-xl border border-gray-700 animate-in slide-in-from-left-2 fade-in">
+                        <input
+                            type="date"
+                            value={customRange.start}
+                            min={availableMonths.length > 0 ? availableMonths[availableMonths.length - 1] + '-01' : undefined}
+                            max={customRange.end}
+                            onChange={(e) => setCustomRange({ ...customRange, start: e.target.value })}
+                            className="bg-gray-700 border-none text-white text-sm rounded-lg px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                        />
+                        <span className="text-gray-400">-</span>
+                        <input
+                            type="date"
+                            value={customRange.end}
+                            min={customRange.start}
+                            max={format(new Date(), 'yyyy-MM-dd')}
+                            onChange={(e) => setCustomRange({ ...customRange, end: e.target.value })}
+                            className="bg-gray-700 border-none text-white text-sm rounded-lg px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                        />
+                    </div>
+                )}
             </div>
 
             {/* Summary Cards */}

@@ -69,13 +69,10 @@ export function ExpensePieChart({ data }: { data: CategoryData[] }) {
                         cx="50%"
                         cy="50%"
                         innerRadius={60}
-                        outerRadius={90}
+                        outerRadius={80}
                         paddingAngle={2}
                         dataKey="value"
-                        label={({ name, percent }) =>
-                            (percent || 0) > 0.05 ? `${name} (${((percent || 0) * 100).toFixed(0)}%)` : ''
-                        }
-                        labelLine={false}
+                        stroke="none"
                     >
                         {data.map((entry, index) => (
                             <Cell
@@ -276,13 +273,16 @@ export function CategoryLegend({ data }: { data: CategoryData[] }) {
     return (
         <div className="grid grid-cols-2 gap-3 mt-4">
             {data.slice(0, 6).map((item, index) => (
-                <div key={index} className="flex items-center gap-2">
+                <div key={index} className="flex items-center gap-2 overflow-hidden">
                     <div
                         className="w-3 h-3 rounded-full flex-shrink-0"
                         style={{ backgroundColor: item.color }}
                     />
-                    <span className="text-gray-400 text-sm truncate">{item.icon} {item.name}</span>
-                    <span className="text-gray-500 text-xs ml-auto">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <span className="flex-shrink-0 text-gray-400">{item.icon}</span>
+                        <span className="text-gray-400 text-sm truncate">{item.name}</span>
+                    </div>
+                    <span className="text-gray-500 text-xs ml-auto flex-shrink-0">
                         {((item.value / total) * 100).toFixed(0)}%
                     </span>
                 </div>

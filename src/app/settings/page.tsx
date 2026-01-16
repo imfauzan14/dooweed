@@ -30,9 +30,39 @@ export default function SettingsPage() {
 
     // Common emojis for categories
     const emojiOptions = [
-        '🍔', '🚗', '🛍️', '🎬', '💡', '🏥', '📚', '🛒', '🏠', '🛡️',
-        '💇', '📱', '✈️', '🎁', '💰', '💻', '📈', '🏢', '🏪', '🎊',
-        '↩️', '💵', '📦', '🎮', '🎵', '💪', '🏋️', '☕', '🍺', '👕',
+        // Food & Drink
+        '🍔', '🍕', '🍣', '🍱', '🍜', '🍝', '🍖', '🍗', '🥩', '🥓',
+        '🥗', '🥪', '🌮', '🌯', '🍲', '🥘', '🍳', '🥛', '☕', '🍵',
+        '🍺', '🍷', '🍹', '🥤', '🍞', '🥐', '🥖', '🥨', '🥯', '🥞',
+        '🧇', '🧀', '🍎', '🍌', '🍇', '🍉', '🍓', '🍒', '🍑', '🍍',
+        // Transport
+        '🚗', '🚕', '🚙', '🚌', '🚎', '🏎️', '🚓', '🚑', '🚒', '🚐',
+        '🚚', '🚛', '🚜', '🏍️', '🛵', '🚲', '🛴', '🚂', '🚆', '🚇',
+        '✈️', '🛫', '🛬', '🚁', '⛴️', '🛳️', '⛵', '🚀', '⛽', '🚧',
+        // Shopping & Entertainment
+        '🛍️', '🛒', '🎁', '📦', '👓', '🕶️', '👔', '👕', '👖', '🧣',
+        '👗', '👘', '👙', '👚', '👛', '👜', '👝', '🎒', '👞', '👟',
+        '🎬', '🎨', '🎭', '🎪', '🎫', '🎟️', '🎮', '🎲', '🎰', '🎳',
+        '🎵', '🎧', '🎤', '🎹', '🎸', '🎻', '🎺', '🎷', '📷', '📹',
+        // Health & Services
+        '🏥', '💊', '💉', '🩸', '🩺', '🚑', '💈', '💇', '💅', '💆',
+        '🧖', '🛁', '🧼', '🧽', '🧹', '🧺', '🧻', '🚿', '🚽', '🔧',
+        '🔨', '🛠️', '⚙️', '🧱', '🔌', '🔋', '💡', '🔦', '🕯️', '🧯',
+        // Home & Bills
+        '🏠', '🏡', '🏢', '🏣', '🏤', '🏥', '🏦', '🏨', '🏩', '🏪',
+        '🏫', '🏬', '🏭', '🏯', '🏰', '💒', '🗼', '🗽', '⛪', '🕌',
+        '🛋️', '🛏️', '🚪', '🪑', '🚽', '🚿', '🛁', '🔥', '💧', '⚡',
+        '📡', '📱', '💻', '🖥️', '🖨️', '⌨️', '🖱️', '💽', '💾', '💿',
+        // Income & Finance
+        '💰', '💴', '💵', '💶', '💷', '💸', '💳', '💎', '⚖️', '🗝️',
+        '📈', '📉', '📊', '📋', '📌', '📍', '📎', '📏', '📐', '✂️',
+        '🔒', '🔓', '🔏', '🔐', '🔑', '🔨', '⛏️', '⚒️', '🛠️', '🗡️',
+        // Misc
+        '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯',
+        '🦁', 'cow', '🐷', '🐽', '🐸', '🐵', '🙈', '🙉', '🙊', '🐒',
+        '🐔', '🐧', '🐦', '🐤', '🐣', '🐥', '🦆', '🦅', '🦉', '🦇',
+        '🐺', '🐗', '🐴', '🦄', '🐝', '🐛', '🦋', '🐌', '🐞', '🐜',
+        '🦟', '🦗', '🕷️', '🕸️', '🦂', '🐢', '🐍', '🦎', '🦖', '🦕',
     ];
 
     const colorOptions = [
@@ -158,31 +188,31 @@ export default function SettingsPage() {
                     {/* Expense Categories */}
                     <div className="glass-card rounded-2xl p-6">
                         <h2 className="text-lg font-semibold text-white mb-4">Expense Categories</h2>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                             {expenseCategories.map((cat) => (
                                 <div
                                     key={cat.id}
-                                    className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-xl group"
+                                    className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-xl group relative overflow-hidden"
                                 >
                                     <div
-                                        className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
+                                        className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0"
                                         style={{ backgroundColor: `${cat.color}20` }}
                                     >
                                         {cat.icon}
                                     </div>
-                                    <span className="flex-1 text-sm text-white truncate">{cat.name}</span>
-                                    <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+                                    <span className="flex-1 text-sm text-white truncate min-w-0">{cat.name}</span>
+                                    <div className="opacity-100 sm:opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity bg-gray-800/80 sm:bg-transparent rounded-lg p-1 sm:p-0 absolute right-2 sm:static backdrop-blur-sm sm:backdrop-blur-none border border-gray-700 sm:border-none shadow-lg sm:shadow-none">
                                         <button
                                             onClick={() => openEditModal(cat)}
-                                            className="p-1 text-gray-500 hover:text-white"
+                                            className="p-1.5 text-gray-300 hover:text-white hover:bg-gray-700/50 rounded-md"
                                         >
-                                            <Edit2 className="w-3 h-3" />
+                                            <Edit2 className="w-3.5 h-3.5" />
                                         </button>
                                         <button
                                             onClick={() => handleDelete(cat.id)}
-                                            className="p-1 text-gray-500 hover:text-red-400"
+                                            className="p-1.5 text-gray-300 hover:text-red-400 hover:bg-red-500/10 rounded-md"
                                         >
-                                            <Trash2 className="w-3 h-3" />
+                                            <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                     </div>
                                 </div>
@@ -193,31 +223,31 @@ export default function SettingsPage() {
                     {/* Income Categories */}
                     <div className="glass-card rounded-2xl p-6">
                         <h2 className="text-lg font-semibold text-white mb-4">Income Categories</h2>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                             {incomeCategories.map((cat) => (
                                 <div
                                     key={cat.id}
-                                    className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-xl group"
+                                    className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-xl group relative overflow-hidden"
                                 >
                                     <div
-                                        className="w-10 h-10 rounded-lg flex items-center justify-center text-xl"
+                                        className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0"
                                         style={{ backgroundColor: `${cat.color}20` }}
                                     >
                                         {cat.icon}
                                     </div>
-                                    <span className="flex-1 text-sm text-white truncate">{cat.name}</span>
-                                    <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+                                    <span className="flex-1 text-sm text-white truncate min-w-0">{cat.name}</span>
+                                    <div className="opacity-100 sm:opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity bg-gray-800/80 sm:bg-transparent rounded-lg p-1 sm:p-0 absolute right-2 sm:static backdrop-blur-sm sm:backdrop-blur-none border border-gray-700 sm:border-none shadow-lg sm:shadow-none">
                                         <button
                                             onClick={() => openEditModal(cat)}
-                                            className="p-1 text-gray-500 hover:text-white"
+                                            className="p-1.5 text-gray-300 hover:text-white hover:bg-gray-700/50 rounded-md"
                                         >
-                                            <Edit2 className="w-3 h-3" />
+                                            <Edit2 className="w-3.5 h-3.5" />
                                         </button>
                                         <button
                                             onClick={() => handleDelete(cat.id)}
-                                            className="p-1 text-gray-500 hover:text-red-400"
+                                            className="p-1.5 text-gray-300 hover:text-red-400 hover:bg-red-500/10 rounded-md"
                                         >
-                                            <Trash2 className="w-3 h-3" />
+                                            <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                     </div>
                                 </div>
@@ -330,15 +360,17 @@ export default function SettingsPage() {
                             {/* Icon Selector */}
                             <div className="space-y-2">
                                 <label className="text-sm text-gray-400">Icon</label>
-                                <div className="grid grid-cols-10 gap-2">
+                                <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-8 gap-4 max-h-60 overflow-y-auto p-4 bg-gray-900/50 rounded-xl border border-gray-800 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
                                     {emojiOptions.map((emoji) => (
                                         <button
                                             key={emoji}
                                             type="button"
                                             onClick={() => setFormData({ ...formData, icon: emoji })}
                                             className={cn(
-                                                'p-2 text-xl rounded-lg transition-colors',
-                                                formData.icon === emoji ? 'bg-blue-500' : 'bg-gray-800 hover:bg-gray-700'
+                                                'w-10 h-10 flex items-center justify-center text-xl rounded-xl transition-all',
+                                                formData.icon === emoji
+                                                    ? 'bg-blue-500 text-white shadow-lg scale-110'
+                                                    : 'bg-gray-800 hover:bg-gray-700 text-gray-300 hover:scale-105'
                                             )}
                                         >
                                             {emoji}

@@ -54,16 +54,26 @@ Return ONLY valid JSON with this exact structure:
 }
 
 CRITICAL RULES:
-1. "Total Belanja", "Total Bayar", "Grand Total" = final amount to charge
-2. "Total Item", "Total Qty" = quantity count, NOT the price
-3. "Kembalian", "Change", "Kembali" = change given, NOT the total
-4. "Diskon", "Discount" = discount amount, NOT the total
-5. Alfamart, Indomaret, stores, restaurants = EXPENSE
-6. "Terima", "Received", "Diterima", salary, refund = INCOME
-7. If merchant has logo/brand name, use the brand (e.g., "McDonalds" not "PT McDonald Indonesia")
-8. Prefer explicit currency symbols ($, Rp, €) over words
-9. Indonesian number format: 79.700 = 79700 (dots are thousands separators)
-10. Date formats: "Tgl. 15-01-2026" = "2026-01-15"
+14. **Merchant Name**:
+   - Extract the store or merchant name.
+   - If the receipt is a **Bank Transfer** or **Digital Wallet** transaction, format it as **"Platform - Destination"** (e.g., "BCA - Budi Santoso", "GoPay - Bluebird", "OVO - Kopi Kenangan").
+   - If unsure, use the most prominent business name. If it's a known franchise (Starbucks, McD, Indomaret, Alfamart), use the clean brand name. If it's a local store, use the full name excluding "PT" or legal suffixes.
+2. **LANGUAGE**: Detect if receipt is Indonesian (ID) or English (EN).
+   - ID: "Total", "Jumlah", "Kembali" (Change), "Pajak" (Tax).
+   - EN: "Total", "Subtotal", "Change", "Tax".
+3. **CURRENCY**: 
+   - IDR: Look for "Rp", "IDR", or numbers with dot thousands separators (e.g., 50.000).
+   - USD/EUR: Look for "$", "€", or numbers with comma separators (e.g., 50,000 for large, or 10.50).
+4. **AMOUNTS**:
+   - "Total Belanja", "Total Bayar", "Grand Total" = final amount.
+   - Do NOT confuse "Total Item" or "Qty" with price.
+   - Do NOT use "Kembalian" or "Change" as the total.
+5. **TRANSACTION TYPE**:
+   - Expense: Buying things, "Total Bayar", "Purchase".
+   - Income: "Gaji", "Salary", "Transfer Masuk", "Topup".
+6. **FORMATTING**:
+   - Date: Convert all to YYYY-MM-DD.
+   - Numbers: Return pure numbers (no separators).
 
 If data is ambiguous or missing, set to null. Do not guess.`
                 },
@@ -73,7 +83,7 @@ If data is ambiguous or missing, set to null. Do not guess.`
                 }
             ],
             response_format: { type: 'json_object' },
-            temperature: 0,
+            temperature: 0.1,
             max_tokens: 1000,
         });
 
