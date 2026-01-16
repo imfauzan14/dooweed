@@ -74,12 +74,7 @@ export async function GET(request: NextRequest) {
                     and(
                         eq(transactions.userId, user.id),
                         gte(transactions.date, startDate),
-                        lte(transactions.date, endDate),
-                        // Exclude transactions from unverified receipts
-                        or(
-                            isNull(transactions.receiptId), // No receipt
-                            eq(receipts.verified, true) // Verified receipt
-                        )
+                        lte(transactions.date, endDate)
                     )
                 )
                 .orderBy(desc(transactions.date), desc(transactions.createdAt))
@@ -102,12 +97,7 @@ export async function GET(request: NextRequest) {
                     and(
                         eq(transactions.userId, user.id),
                         gte(transactions.date, startDate),
-                        lte(transactions.date, endDate),
-                        // Exclude unverified receipts
-                        or(
-                            isNull(transactions.receiptId),
-                            eq(receipts.verified, true)
-                        )
+                        lte(transactions.date, endDate)
                     )
                 )
                 .groupBy(transactions.type);
@@ -191,11 +181,7 @@ export async function GET(request: NextRequest) {
                     and(
                         eq(transactions.userId, user.id),
                         gte(transactions.date, startDate),
-                        lte(transactions.date, endDate),
-                        or(
-                            isNull(transactions.receiptId),
-                            eq(receipts.verified, true)
-                        )
+                        lte(transactions.date, endDate)
                     )
                 )
                 .groupBy(transactions.categoryId, categories.name, categories.color, categories.icon, transactions.type)
