@@ -28,10 +28,19 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // Validate API key
+        if (!process.env.DEEPSEEK_API_KEY) {
+            console.error('[OCR Enhanced API] DeepSeek API key not configured');
+            return NextResponse.json(
+                { error: 'OCR enhancement unavailable - API key not configured' },
+                { status: 503 }
+            );
+        }
+
         console.log('[OCR Enhanced API] Processing with DeepSeek...');
 
         const deepseek = new OpenAI({
-            apiKey: process.env.DEEPSEEK_API_KEY || 'placeholder',
+            apiKey: process.env.DEEPSEEK_API_KEY,
             baseURL: 'https://api.deepseek.com/v1',
         });
 
@@ -54,7 +63,7 @@ Return ONLY valid JSON with this exact structure:
 }
 
 CRITICAL RULES:
-14. **Merchant Name**:
+1. **Merchant Name**:
    - Extract the store or merchant name.
    - If the receipt is a **Bank Transfer** or **Digital Wallet** transaction, format it as **"Platform - Destination"** (e.g., "BCA - Budi Santoso", "GoPay - Bluebird", "OVO - Kopi Kenangan").
    - If unsure, use the most prominent business name. If it's a known franchise (Starbucks, McD, Indomaret, Alfamart), use the clean brand name. If it's a local store, use the full name excluding "PT" or legal suffixes.

@@ -26,14 +26,15 @@ export const CURRENCIES = {
 export type CurrencyCode = keyof typeof CURRENCIES;
 
 /**
- * Fetch latest exchange rate from Frankfurter API
+ * Fetch latest exchange rate from Frankfurter API with LLM fallback
  */
 export async function getExchangeRate(from: string, to: string): Promise<number> {
     if (from === to) return 1;
 
     try {
         const response = await fetch(
-            `${FRANKFURTER_API}/latest?from=${from}&to=${to}`
+            `${FRANKFURTER_API}/latest?from=${from}&to=${to}`,
+            { signal: AbortSignal.timeout(5000) } // 5s timeout
         );
 
         if (!response.ok) {
@@ -43,8 +44,20 @@ export async function getExchangeRate(from: string, to: string): Promise<number>
         const data: ExchangeRateResponse = await response.json();
         return data.rates[to] || 1;
     } catch (error) {
-        console.error('Exchange rate fetch failed:', error);
-        return 1; // Fallback to 1:1 if API fails
+        console.error('[Currency] Frankfurter API failed:', error);
+
+        // Try LLM fallback
+        try {
+            const llmRate = await getLLMFallbackRate(from, to);
+            console.log(`[Currency] Using LLM fallback rate: ${llmRate}`);
+            return llmRate;
+        } catch (llmError) {
+            console.error('[Currency] LLM fallback failed:', llmError);
+            // Last resort: hardcoded rates
+            const hardcodedRate = getFallbackRate(from, to);
+            console.warn(`[Currency] Using hardcoded fallback: ${hardcodedRate}`);
+            return hardcodedRate;
+        }
     }
 }
 
@@ -89,8 +102,15 @@ export async function convertCurrency(
 
     // Check if conversion involves IDR - use ExchangeRate-API since Frankfurter doesn't support it
     if (from === 'IDR' || to === 'IDR') {
+        // NOTE: ExchangeRate-API doesn't support historical dates, uses latest rate
+        if (date) {
+            console.warn('[Currency] Historical rate not available for IDR, using latest rate as approximation');
+        }
+
         try {
-            const baseResponse = await fetch(`${EXCHANGERATE_API}/${from}`);
+            const baseResponse = await fetch(`${EXCHANGERATE_API}/${from}`, {
+                signal: AbortSignal.timeout(5000)
+            });
             if (!baseResponse.ok) throw new Error('ExchangeRate-API failed');
 
             const data = await baseResponse.json();
@@ -103,10 +123,19 @@ export async function convertCurrency(
             return converted;
         } catch (error) {
             console.error('[Currency] ExchangeRate-API failed:', error);
-            // Fallback to hardcoded rate if API fails
-            const fallbackRate = getFallbackRate(from, to);
-            console.warn(`[Currency] Using fallback rate: ${fallbackRate}`);
-            return amount * fallbackRate;
+
+            // Try LLM fallback
+            try {
+                const llmRate = await getLLMFallbackRate(from, to);
+                console.log(`[Currency] Using LLM fallback rate: ${llmRate}`);
+                return amount * llmRate;
+            } catch (llmError) {
+                console.error('[Currency] LLM fallback failed:', llmError);
+                // Last resort: hardcoded rates
+                const fallbackRate = getFallbackRate(from, to);
+                console.warn(`[Currency] Using hardcoded fallback: ${fallbackRate}`);
+                return amount * fallbackRate;
+            }
         }
     }
 
@@ -121,19 +150,58 @@ export async function convertCurrency(
 }
 
 /**
- * Fallback exchange rates (approximate, updated periodically)
- * Used when APIs fail
+ * Fallback exchange rates (updated Jan 16, 2026)
+ * Last resort when both APIs and LLM fail
  */
 function getFallbackRate(from: string, to: string): number {
     const rates: Record<string, Record<string, number>> = {
-        'USD': { 'IDR': 15700, 'EUR': 0.92, 'GBP': 0.79 },
-        'EUR': { 'IDR': 17100, 'USD': 1.09, 'GBP': 0.86 },
-        'GBP': { 'IDR': 19900, 'USD': 1.27, 'EUR': 1.16 },
-        'IDR': { 'USD': 0.000064, 'EUR': 0.000058, 'GBP': 0.00005 },
+        'USD': { 'IDR': 16850, 'EUR': 0.93, 'GBP': 0.79, 'SGD': 1.35, 'JPY': 157, 'CNY': 7.25 },
+        'EUR': { 'IDR': 18150, 'USD': 1.08, 'GBP': 0.85, 'SGD': 1.46, 'JPY': 169 },
+        'GBP': { 'IDR': 21350, 'USD': 1.27, 'EUR': 1.18, 'SGD': 1.72 },
+        'SGD': { 'IDR': 12470, 'USD': 0.74, 'EUR': 0.68, 'GBP': 0.58 },
+        'JPY': { 'IDR': 107, 'USD': 0.0064, 'EUR': 0.0059 },
+        'CNY': { 'IDR': 2325, 'USD': 0.14, 'EUR': 0.13 },
+        'IDR': {
+            'USD': 1 / 16850,
+            'EUR': 1 / 18150,
+            'GBP': 1 / 21350,
+            'SGD': 1 / 12470,
+            'JPY': 1 / 107,
+            'CNY': 1 / 2325
+        },
     };
 
     if (from === to) return 1;
-    return rates[from]?.[to] || rates[to]?.[from] ? 1 / rates[to]![from]! : 1;
+
+    // Direct lookup
+    if (rates[from]?.[to]) return rates[from][to];
+
+    // Inverse lookup with proper null check
+    const inverse = rates[to]?.[from];
+    if (inverse && inverse !== 0) return 1 / inverse;
+
+    // Last resort: log warning and return 1
+    console.warn(`[Currency] No fallback rate for ${from} → ${to}, using 1:1`);
+    return 1;
+}
+
+/**
+ * Fetch exchange rate from LLM fallback API
+ */
+async function getLLMFallbackRate(from: string, to: string): Promise<number> {
+    const response = await fetch('/api/exchange-rates/fallback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from, to }),
+        signal: AbortSignal.timeout(10000), // 10s timeout for LLM
+    });
+
+    if (!response.ok) {
+        throw new Error(`LLM fallback API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.rate;
 }
 
 /**

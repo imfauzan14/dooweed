@@ -263,12 +263,14 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
 
         // Batch complete notification
         if (isAutoMode) {
-            onBatchComplete?.();
+            onBatchComplete?.(); // Refresh list after auto-save
             setResults([]);
         } else if (newResults.length > 0) {
-            // Manual mode
+            // Manual mode - open review modal
             setIsReviewMode(true);
             setCurrentIndex(0);
+            // Also refresh list so manually saved items show up
+            onBatchComplete?.();
         }
     }, [results.length, useEnhancement, isAutoMode, onCreateTransaction, onBatchComplete, processedSignatures]);
 
@@ -685,7 +687,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
                                     onClick={handleSkip}
                                     className="px-6 py-3 border border-gray-700 rounded-xl text-gray-300 font-medium hover:bg-gray-800 transition-colors"
                                 >
-                                    Skip
+                                    Later
                                 </button>
                                 <button
                                     onClick={handleSaveAndNext}

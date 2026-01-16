@@ -38,7 +38,7 @@ export async function PATCH(
     try {
         const { id } = await params;
         const body = await request.json();
-        const { ocrMerchant, ocrDate, ocrAmount, ocrCurrency, verified } = body;
+        const { ocrMerchant, ocrDate, ocrAmount, ocrCurrency, verified, isAutomated } = body;
 
         const existing = await db
             .select()
@@ -56,6 +56,7 @@ export async function PATCH(
         if (ocrAmount !== undefined) updateValues.ocrAmount = parseFloat(ocrAmount);
         if (ocrCurrency !== undefined) updateValues.ocrCurrency = ocrCurrency;
         if (verified !== undefined) updateValues.verified = verified;
+        if (isAutomated !== undefined) updateValues.isAutomated = isAutomated;
 
         await db.update(receipts).set(updateValues).where(eq(receipts.id, id));
 

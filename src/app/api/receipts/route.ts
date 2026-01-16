@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
                 ocrConfidence: receipts.ocrConfidence,
                 fileName: receipts.fileName,
                 verified: receipts.verified,
+                isAutomated: receipts.isAutomated, // Auto-pilot flag
                 createdAt: receipts.createdAt,
                 // Don't include base64 in list for performance
             })
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
             ocrConfidence,
             fileName,
             verified,
+            isAutomated,
         } = body;
 
         if (!imageBase64) {
@@ -76,6 +78,7 @@ export async function POST(request: NextRequest) {
             ocrConfidence: ocrConfidence ? parseFloat(ocrConfidence) : null,
             fileName: fileName || null,
             verified: verified || false,
+            isAutomated: isAutomated || false,
         };
 
         await db.insert(receipts).values(newReceipt);
@@ -114,6 +117,7 @@ export async function PATCH(request: NextRequest) {
                 ocrCurrency: receipt.ocrCurrency || null,
                 ocrConfidence: receipt.ocrConfidence ? parseFloat(receipt.ocrConfidence) : null,
                 verified: receipt.verified || false,
+                isAutomated: receipt.isAutomated || false,
             });
             insertedIds.push(id);
         }

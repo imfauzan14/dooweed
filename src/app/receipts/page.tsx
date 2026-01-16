@@ -47,6 +47,7 @@ interface SavedReceipt {
     ocrConfidence: number | null;
     fileName?: string | null;
     verified: boolean;
+    isAutomated?: boolean; // Auto-pilot flag
     createdAt: string;
 }
 
@@ -175,10 +176,14 @@ export default function ReceiptsPage() {
                     ocrMerchant: result.editedMerchant || result.merchant,
                     ocrDate: result.editedDate || result.date,
                     ocrAmount: result.editedAmount || result.amount,
-                    ocrCurrency: result.currency || 'IDR', // Keep IDR fallback if absolutely null because DB might require it, but use detected first
+                    ocrCurrency: result.currency || 'IDR',
                     ocrConfidence: result.confidence,
                     fileName: result.fileName,
-                    verified: true, // User requested Auto to NOT be pending, so it must be verified.
+                    // Auto entries that were manually edited become verified
+                    // Auto entries without edits stay unverified
+                    // Manual review entries are always verified
+                    verified: !result.isAutomated || (result.editedAmount !== result.amount || result.editedMerchant !== result.merchant || result.editedType !== result.transactionType),
+                    isAutomated: result.isAutomated || false,
                 }),
             });
 
@@ -398,14 +403,13 @@ export default function ReceiptsPage() {
                         {/* Info */}
                         <div className="min-w-0 overflow-hidden">
                             <p className="font-medium text-sm sm:text-base text-white truncate w-full">
-                                {receipt.ocrMerchant?.replace(' [AUTOMATED]', '') || 'Unknown Merchant'}
+                                {receipt.ocrMerchant || 'Unknown Merchant'}
                             </p>
                             <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-gray-500 mt-1">
                                 <span className="whitespace-nowrap flex-shrink-0">{receipt.ocrDate ? format(new Date(receipt.ocrDate), 'MMM d, yyyy') : 'No date'}</span>
                                 {(() => {
-                                    const isAuto = receipt.ocrMerchant?.includes('[AUTOMATED]');
-
-                                    if (isAuto) {
+                                    // Check database field instead of merchant name
+                                    if (receipt.isAutomated) {
                                         return (
                                             <span className="flex-shrink-0 flex items-center gap-0.5 text-blue-400 text-[10px] bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
                                                 <Zap className="w-3 h-3" /> Auto

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { transactions, categories } from '@/db/schema';
-import { eq, and, gte, lte, sql, desc } from 'drizzle-orm';
+import { transactions, categories, receipts } from '@/db/schema';
+import { eq, and, gte, lte, sql, desc, or, isNull } from 'drizzle-orm';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { generateTransactionCSV } from '@/lib/export';
 
@@ -69,11 +69,17 @@ export async function GET(request: NextRequest) {
                 })
                 .from(transactions)
                 .leftJoin(categories, eq(transactions.categoryId, categories.id))
+                .leftJoin(receipts, eq(transactions.receiptId, receipts.id))
                 .where(
                     and(
                         eq(transactions.userId, DEFAULT_USER_ID),
                         gte(transactions.date, startDate),
-                        lte(transactions.date, endDate)
+                        lte(transactions.date, endDate),
+                        // Exclude transactions from unverified receipts
+                        or(
+                            isNull(transactions.receiptId), // No receipt
+                            eq(receipts.verified, true) // Verified receipt
+                        )
                     )
                 )
                 .orderBy(desc(transactions.date), desc(transactions.createdAt))
@@ -91,11 +97,17 @@ export async function GET(request: NextRequest) {
                     count: sql<number>`COUNT(*)`,
                 })
                 .from(transactions)
+                .leftJoin(receipts, eq(transactions.receiptId, receipts.id))
                 .where(
                     and(
                         eq(transactions.userId, DEFAULT_USER_ID),
                         gte(transactions.date, startDate),
-                        lte(transactions.date, endDate)
+                        lte(transactions.date, endDate),
+                        // Exclude unverified receipts
+                        or(
+                            isNull(transactions.receiptId),
+                            eq(receipts.verified, true)
+                        )
                     )
                 )
                 .groupBy(transactions.type);
@@ -174,11 +186,16 @@ export async function GET(request: NextRequest) {
                 })
                 .from(transactions)
                 .leftJoin(categories, eq(transactions.categoryId, categories.id))
+                .leftJoin(receipts, eq(transactions.receiptId, receipts.id))
                 .where(
                     and(
                         eq(transactions.userId, DEFAULT_USER_ID),
                         gte(transactions.date, startDate),
-                        lte(transactions.date, endDate)
+                        lte(transactions.date, endDate),
+                        or(
+                            isNull(transactions.receiptId),
+                            eq(receipts.verified, true)
+                        )
                     )
                 )
                 .groupBy(transactions.categoryId, categories.name, categories.color, categories.icon, transactions.type)

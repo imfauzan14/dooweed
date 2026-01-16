@@ -109,7 +109,8 @@ export function ReceiptEditModal({
                     ocrDate: date,
                     ocrAmount: parseFloat(amount),
                     ocrCurrency: currency,
-                    verified: true,
+                    verified: true, // Mark as reviewed
+                    isAutomated: false, // Clear auto flag when manually edited
                 }),
             });
 

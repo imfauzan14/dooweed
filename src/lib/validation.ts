@@ -15,7 +15,8 @@ export const transactionSchema = z.object({
     currency: z.string()
         .length(3, 'Currency must be 3-letter code (e.g., USD, IDR)')
         .regex(/^[A-Z]{3}$/, 'Currency must be uppercase letters'),
-    categoryId: z.string().uuid('Invalid category ID').optional().nullable(),
+    categoryId: z.string().uuid('Invalid category ID').optional().nullable()
+        .or(z.literal('').transform(() => null)), // Allow empty string => null
     description: z.string()
         .max(500, 'Description too long (max 500 characters)')
         .optional()
@@ -47,7 +48,8 @@ export const receiptSchema = z.object({
 
 // Budget validation
 export const budgetSchema = z.object({
-    categoryId: z.string().uuid('Invalid category ID'),
+    categoryId: z.string().uuid('Invalid category ID').optional().nullable() // Optional for universal budgets
+        .or(z.literal('').transform(() => null)),
     amount: z.number()
         .positive('Budget amount must be positive')
         .max(1_000_000_000, 'Budget amount too large'),

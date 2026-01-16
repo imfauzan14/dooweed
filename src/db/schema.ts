@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { text, integer, real, sqliteTable } from 'drizzle-orm/sqlite-core';
+import { text, integer, real, sqliteTable, index } from 'drizzle-orm/sqlite-core';
 
 // Users table (for future multi-user support)
 export const users = sqliteTable('users', {
@@ -34,8 +34,12 @@ export const receipts = sqliteTable('receipts', {
   ocrConfidence: real('ocr_confidence'),
   fileName: text('file_name'),
   verified: integer('verified', { mode: 'boolean' }).default(false),
+  isAutomated: integer('is_automated', { mode: 'boolean' }).default(false), // Auto-pilot flag
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => ({
+  fileNameIdx: index('idx_receipts_filename').on(table.fileName),
+  userIdx: index('idx_receipts_user').on(table.userId),
+}));
 
 // Recurring transactions table
 export const recurringTransactions = sqliteTable('recurring_transactions', {
@@ -61,25 +65,31 @@ export const transactions = sqliteTable('transactions', {
   amount: real('amount').notNull(),
   currency: text('currency').default('IDR'),
   amountInBase: real('amount_in_base'),
-  categoryId: text('category_id').references(() => categories.id),
+  categoryId: text('category_id').references(() => categories.id, { onDelete: 'set null' }),
   description: text('description'),
   date: text('date').notNull(),
   receiptId: text('receipt_id').references(() => receipts.id, { onDelete: 'cascade' }),
   recurringId: text('recurring_id').references(() => recurringTransactions.id, { onDelete: 'set null' }),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => ({
+  userDateIdx: index('idx_transactions_user_date').on(table.userId, table.date),
+  categoryIdx: index('idx_transactions_category').on(table.categoryId),
+  dateIdx: index('idx_transactions_date').on(table.date),
+}));
 
 // Budgets table
 export const budgets = sqliteTable('budgets', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id),
-  categoryId: text('category_id').references(() => categories.id), // null = universal budget
+  categoryId: text('category_id').references(() => categories.id, { onDelete: 'cascade' }), // null = universal budget
   amount: real('amount').notNull(),
   currency: text('currency').default('IDR'),
   period: text('period', { enum: ['weekly', 'monthly', 'yearly'] }).notNull(),
   startDate: text('start_date'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => ({
+  userCategoryIdx: index('idx_budgets_user_category').on(table.userId, table.categoryId),
+}));
 
 // Exchange rate cache table
 export const exchangeRates = sqliteTable('exchange_rates', {

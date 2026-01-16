@@ -20,20 +20,12 @@ export async function GET(request: NextRequest) {
         const offset = parseInt(searchParams.get('offset') || '0');
 
         // Validate and sanitize pagination
-        const { limit: safeLimit, offset: safeOffset } = validatePagination({ limit: limit.toString(), offset: offset.toString() });
+        const { limit: safeLimit, offset: safeOffset } = validatePagination({
+            limit: limit.toString(),
+            offset: offset.toString()
+        });
 
-        let query = db
-            .select({
-                transaction: transactions,
-                category: categories,
-            })
-            .from(transactions)
-            .leftJoin(categories, eq(transactions.categoryId, categories.id))
-            .where(eq(transactions.userId, DEFAULT_USER_ID))
-            .orderBy(desc(transactions.date))
-            .limit(limit)
-            .offset(offset);
-
+        // Build query conditions
         const conditions = [eq(transactions.userId, DEFAULT_USER_ID)];
 
         if (startDate) {
