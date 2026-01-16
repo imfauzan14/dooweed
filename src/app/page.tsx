@@ -96,8 +96,19 @@ export default function DashboardPage() {
     fetch('/api/reports?type=available_months')
       .then(res => res.json())
       .then(data => {
+        const currentMonth = format(new Date(), 'yyyy-MM');
+
         if (data.data && data.data.length > 0) {
-          setAvailableMonths(data.data);
+          const months = data.data; // Already sorted desc by API
+          // Always include current month even if it has no data
+          if (!months.includes(currentMonth)) {
+            setAvailableMonths([currentMonth, ...months]);
+          } else {
+            setAvailableMonths(months);
+          }
+        } else {
+          // No data at all - just show current month
+          setAvailableMonths([currentMonth]);
         }
       })
       .catch(err => console.error('Failed to fetch available months:', err));
@@ -281,7 +292,16 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Dooweed</h1>
           <div className="flex items-center gap-3 mt-1">
-            <button onClick={handlePrevMonth} className="p-1 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white transition-colors">
+            <button
+              onClick={handlePrevMonth}
+              disabled={availableMonths.length === 0 || availableMonths.indexOf(format(currentDate, 'yyyy-MM')) === availableMonths.length - 1}
+              className={cn(
+                "p-1 rounded-lg transition-colors",
+                availableMonths.length === 0 || availableMonths.indexOf(format(currentDate, 'yyyy-MM')) === availableMonths.length - 1
+                  ? "text-gray-700 cursor-not-allowed"
+                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
+              )}
+            >
               <ChevronLeft className="w-5 h-5" />
             </button>
             <span className="text-lg font-medium text-white min-w-[140px] text-center">
