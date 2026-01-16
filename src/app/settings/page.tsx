@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/Navigation';
 import { CURRENCIES } from '@/lib/currency';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCategories } from '@/contexts/CategoriesContext';
 
 interface Category {
     id: string;
@@ -17,8 +18,9 @@ interface Category {
 
 export default function SettingsPage() {
     const { user, signOut } = useAuth();
-    const [categories, setCategories] = useState<Category[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const { categories, refreshCategories } = useCategories();
+    // const [categories, setCategories] = useState<Category[]>([]); // Removed local state
+    // const [isLoading, setIsLoading] = useState(true); // Removed local state
     const [activeTab, setActiveTab] = useState<'categories' | 'preferences' | 'account'>('categories');
     const [showModal, setShowModal] = useState(false);
     const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -92,7 +94,7 @@ export default function SettingsPage() {
     ];
 
     useEffect(() => {
-        fetchCategories();
+        // fetchCategories(); // Handled by context
         checkHasData();
     }, []);
 
@@ -184,19 +186,6 @@ export default function SettingsPage() {
     }, [fallbackOrder, enabledMethods]);
 
 
-    const fetchCategories = async () => {
-        setIsLoading(true);
-        try {
-            const response = await fetch('/api/categories');
-            const data = await response.json();
-            setCategories(data.data || []);
-        } catch (error) {
-            console.error('Failed to fetch categories:', error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -215,7 +204,7 @@ export default function SettingsPage() {
                 setShowModal(false);
                 setEditingCategory(null);
                 setFormData({ name: '', type: 'expense', icon: '📁', color: '#6366F1' });
-                fetchCategories();
+                refreshCategories();
             }
         } catch (error) {
             console.error('Failed to save category:', error);
@@ -227,7 +216,7 @@ export default function SettingsPage() {
 
         try {
             await fetch(`/api/categories?id=${id}`, { method: 'DELETE' });
-            fetchCategories();
+            refreshCategories();
         } catch (error) {
             console.error('Failed to delete:', error);
         }
@@ -255,35 +244,35 @@ export default function SettingsPage() {
             />
 
             {/* Tabs */}
-            <div className="flex gap-2 p-1 bg-gray-800/50 rounded-xl w-fit">
+            <div className="flex flex-wrap gap-2 p-1 bg-gray-800/50 rounded-xl w-full sm:w-fit">
                 <button
                     onClick={() => setActiveTab('categories')}
                     className={cn(
-                        'px-4 py-2 rounded-lg font-medium transition-colors',
-                        activeTab === 'categories' ? 'bg-blue-500 text-white' : 'text-gray-400'
+                        'flex-1 sm:flex-none px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap text-sm sm:text-base flex items-center justify-center min-w-[110px]',
+                        activeTab === 'categories' ? 'bg-blue-500 text-white' : 'text-gray-400 hover:text-gray-300'
                     )}
                 >
-                    <Tag className="w-4 h-4 inline-block mr-2" />
+                    <Tag className="w-4 h-4 mr-2 flex-shrink-0" />
                     Categories
                 </button>
                 <button
                     onClick={() => setActiveTab('preferences')}
                     className={cn(
-                        'px-4 py-2 rounded-lg font-medium transition-colors',
-                        activeTab === 'preferences' ? 'bg-blue-500 text-white' : 'text-gray-400'
+                        'flex-1 sm:flex-none px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap text-sm sm:text-base flex items-center justify-center min-w-[110px]',
+                        activeTab === 'preferences' ? 'bg-blue-500 text-white' : 'text-gray-400 hover:text-gray-300'
                     )}
                 >
-                    <Settings className="w-4 h-4 inline-block mr-2" />
+                    <Settings className="w-4 h-4 mr-2 flex-shrink-0" />
                     Preferences
                 </button>
                 <button
                     onClick={() => setActiveTab('account')}
                     className={cn(
-                        'px-4 py-2 rounded-lg font-medium transition-colors',
-                        activeTab === 'account' ? 'bg-blue-500 text-white' : 'text-gray-400'
+                        'flex-1 sm:flex-none px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap text-sm sm:text-base flex items-center justify-center min-w-[110px]',
+                        activeTab === 'account' ? 'bg-blue-500 text-white' : 'text-gray-400 hover:text-gray-300'
                     )}
                 >
-                    <User className="w-4 h-4 inline-block mr-2" />
+                    <User className="w-4 h-4 mr-2 flex-shrink-0" />
                     Account
                 </button>
             </div>

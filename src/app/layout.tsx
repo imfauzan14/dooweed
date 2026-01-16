@@ -5,6 +5,7 @@ import { Navigation } from "@/components/Navigation";
 import { AuthProvider } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { AuthLayout } from '@/components/AuthLayout';
+import { CategoriesProvider } from '@/contexts/CategoriesContext';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -25,11 +26,13 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={`${inter.className} bg-gray-950 text-white antialiased`}>
         <AuthProvider>
-          <ProtectedRoute>
+          <CategoriesProvider>
             <AuthLayout>
-              {children}
+              <ProtectedRoute>
+                {children}
+              </ProtectedRoute>
             </AuthLayout>
-          </ProtectedRoute>
+          </CategoriesProvider>
         </AuthProvider>
       </body>
     </html>
