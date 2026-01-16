@@ -152,8 +152,10 @@ export default function SettingsPage() {
         setCurrencyLoading(true); // Using same loading state for simplicity, or could add specific syncLoading
         try {
             // First fetch available currencies to know what to sync
-            // We know our target is IDR for now as per system default
-            const currenciesToSync = Object.keys(CURRENCIES).filter(c => c !== 'IDR').slice(0, 6);
+            // Only sync currencies that don't have a value yet (preserve user settings)
+            const currenciesToSync = Object.keys(CURRENCIES)
+                .filter(c => c !== 'IDR')
+                .filter(c => !customRates[c]?.['IDR']); // Only empty ones
 
             // We'll fetch rates against IDR one by one or batch if API supports it. 
             // Our internal API /api/exchange-rates?from=X&to=IDR works.
@@ -559,11 +561,12 @@ export default function SettingsPage() {
                                 className="px-3 py-1.5 text-sm border border-blue-500/30 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-colors flex items-center gap-2"
                             >
                                 <Globe className={cn("w-3.5 h-3.5", currencyLoading ? "animate-spin" : "")} />
-                                {currencyLoading ? 'Syncing...' : 'Sync with Live Rates'}
+                                {currencyLoading ? 'Syncing...' : 'Fill Missing Rates'}
                             </button>
                         </div>
                         <p className="text-sm text-gray-400 mb-6">
-                            These rates are used when API fails and LLM estimation is unavailable
+                            These rates are used when API fails and LLM estimation is unavailable.
+                            Use "Fill Missing Rates" to auto-populate empty fields without overwriting your changes.
                         </p>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
