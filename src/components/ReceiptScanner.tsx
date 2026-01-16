@@ -11,6 +11,8 @@ import { extractReceiptData, compressImage, type OCRResult } from '@/lib/ocr';
 import { CURRENCIES } from '@/lib/currency';
 import { format } from 'date-fns';
 import { createPortal } from 'react-dom';
+import { queueDb, type QueenItem } from '@/lib/queue';
+import { v4 as uuid } from 'uuid';
 
 interface EnhancedOCRResult {
     enhancementUsed?: boolean;
@@ -70,59 +72,39 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
 
     const completedResults = results.filter(r => r.status === 'completed');
 
-    const processFiles = useCallback(async (files: File[]) => {
-        if (files.length === 0) return;
+    const [resumeCount, setResumeCount] = useState(0);
 
-        // Filter duplicates
-        const uniqueFiles: File[] = [];
-        const ignoredFiles: string[] = [];
-
-        for (const file of files) {
-            // Check 1: Session-based duplicate (exact file object or name+size in current batch)
-            const signature = `${file.name}-${file.size}`;
-
-            // Check 2: Database-based duplicate (filename match against existing receipts)
-            // Note: matching by filename is what the user requested ("filename that are already inside the data")
-            const isDbDuplicate = existingReceipts.some(r => r.fileName === file.name);
-
-            if (processedSignatures.has(signature) || isDbDuplicate) {
-                ignoredFiles.push(file.name);
-            } else {
-                uniqueFiles.push(file);
-                setProcessedSignatures(prev => new Set(prev).add(signature));
+    // Initial check for pending items
+    useEffect(() => {
+        queueDb.getPendingItems().then(items => {
+            if (items.length > 0) {
+                setResumeCount(items.length);
             }
-        }
+        });
+    }, []);
 
-        if (ignoredFiles.length > 0) {
-            alert(`Skipped ${ignoredFiles.length} duplicate file(s) (already exists):\n${ignoredFiles.join('\n')}`);
-        }
-
-        // If all files were duplicates, cleanup and return
-        if (uniqueFiles.length === 0) {
-            setIsProcessing(false);
-            setUploadProgress([]);
-            return;
-        }
+    const processQueue = useCallback(async () => {
+        const pendingItems = await queueDb.getPendingItems();
+        if (pendingItems.length === 0) return;
 
         setIsProcessing(true);
-        // If not in auto mode, prepare for review. In auto mode, we stay on the screen.
-        if (!isAutoMode) {
-            setIsReviewMode(false);
-        }
+        if (!isAutoMode) setIsReviewMode(false);
 
-        const newResults: ScanResult[] = [];
-        const startIndex = results.length;
-
-        // Initialize progress tracking
-        const initialProgress: UploadProgress[] = uniqueFiles.map((file) => ({
-            filename: file.name,
-            status: 'waiting' as const,
-            progress: 0,
+        // Sync local state with queue
+        const initialProgress: UploadProgress[] = pendingItems.map(item => ({
+            filename: item.fileName,
+            status: item.status === 'processing' ? 'processing' : 'waiting',
+            progress: item.status === 'processing' ? 10 : 0
         }));
         setUploadProgress(initialProgress);
 
-        const processingResults: ScanResult[] = uniqueFiles.map(() => ({
-            imageBase64: '',
+        // Map queue items to results structure
+        // We need to keep track of indices to update results correctly
+        // The queue might be mixed with new files, so we append to existing results
+        const startResultIndex = results.length;
+
+        const newResultsPlaceholder: ScanResult[] = pendingItems.map(item => ({
+            imageBase64: '', // Will be filled
             rawText: '',
             merchant: null,
             date: null,
@@ -132,32 +114,36 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
             items: [],
             transactionType: null,
             status: 'processing' as const,
+            fileName: item.fileName
         }));
 
-        setResults(prev => [...prev, ...processingResults]);
+        setResults(prev => [...prev, ...newResultsPlaceholder]);
 
-        for (let i = 0; i < uniqueFiles.length; i++) {
-            const file = uniqueFiles[i];
+        // Process sequentially to be safe
+        for (let i = 0; i < pendingItems.length; i++) {
+            const item = pendingItems[i];
+            const resultIndex = startResultIndex + i;
 
-            const index = startIndex + i;
-
-            // Update to processing
+            // Update UI to processing
             setUploadProgress(prev => {
                 const updated = [...prev];
                 updated[i] = { ...updated[i], status: 'processing', progress: 10 };
                 return updated;
             });
 
+            await queueDb.updateStatus(item.id, 'processing');
+
             try {
-                // Compress image - 30% progress
-                const compressedImage = await compressImage(file);
+                // Compress - 30%
                 setUploadProgress(prev => {
                     const updated = [...prev];
                     updated[i] = { ...updated[i], progress: 30, currentStep: 'Compressed' };
                     return updated;
                 });
 
-                // Step 1: Always run Tesseract client-side - 50% progress
+                const compressedImage = await compressImage(item.file);
+
+                // OCR - 50%
                 const tesseractResult = await extractReceiptData(compressedImage);
                 setUploadProgress(prev => {
                     const updated = [...prev];
@@ -165,9 +151,8 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
                     return updated;
                 });
 
-                // Step 2: If enhancement enabled, send raw text to DeepSeek API
+                // Enhancement
                 let ocrResult: OCRResult & EnhancedOCRResult = tesseractResult;
-
                 if (useEnhancement && tesseractResult.rawText) {
                     try {
                         const response = await fetch('/api/ocr-enhanced', {
@@ -178,36 +163,25 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
 
                         if (response.ok) {
                             const { data } = await response.json();
-                            // Merge DeepSeek results with Tesseract fallback
                             ocrResult = {
-                                rawText: tesseractResult.rawText,
-                                merchant: data.merchant || tesseractResult.merchant,
-                                date: data.date || tesseractResult.date,
+                                ...tesseractResult,
+                                ...data,
                                 amount: data.amount ?? tesseractResult.amount,
-                                currency: data.currency || tesseractResult.currency,
-                                transactionType: data.transactionType || tesseractResult.transactionType,
-                                confidence: data.confidence ?? tesseractResult.confidence,
-                                items: data.items || tesseractResult.items,
+                                merchant: data.merchant || tesseractResult.merchant,
                                 enhancementUsed: true,
                             };
-                            console.log('[ReceiptScanner] ✅ DeepSeek enhancement used');
                             setUploadProgress(prev => {
                                 const updated = [...prev];
                                 updated[i] = { ...updated[i], progress: 80, currentStep: 'AI enhanced' };
                                 return updated;
                             });
-                        } else {
-                            throw new Error('API returned error');
                         }
-                    } catch (error) {
-                        console.warn('[ReceiptScanner] DeepSeek failed, using Tesseract:', error);
-                        ocrResult = { ...tesseractResult, enhancementUsed: false };
+                    } catch (e) {
+                        console.warn('DeepSeek failed, using fallback');
                     }
                 }
 
-                const merchantName = ocrResult.merchant || '';
-                const finalMerchantName = merchantName;
-
+                // Finalize result
                 const completedResult: ScanResult = {
                     ...ocrResult,
                     imageBase64: compressedImage,
@@ -215,42 +189,47 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
                     editedType: ocrResult.transactionType || 'expense',
                     editedAmount: ocrResult.amount ? Math.abs(ocrResult.amount) : undefined,
                     editedDate: (ocrResult.date && /^\d{4}-\d{2}-\d{2}$/.test(ocrResult.date)) ? ocrResult.date : format(new Date(), 'yyyy-MM-dd'),
-                    editedMerchant: finalMerchantName,
+                    editedMerchant: ocrResult.merchant || '',
                     isAutomated: isAutoMode,
-                    fileName: file.name,
+                    fileName: item.fileName,
                 };
 
                 setResults(prev => {
                     const updated = [...prev];
-                    updated[index] = completedResult;
+                    updated[resultIndex] = completedResult;
                     return updated;
                 });
 
-                newResults.push(completedResult);
-
-                // In Auto Mode, save immediately
+                // Auto Mode Handling
                 if (isAutoMode) {
-                    await onCreateTransaction?.(completedResult); // Await to ensure seq
+                    await onCreateTransaction?.(completedResult);
                 }
 
-                // Mark as complete
+                // Mark complete in UI
                 setUploadProgress(prev => {
                     const updated = [...prev];
                     updated[i] = { ...updated[i], status: 'complete', progress: 100 };
                     return updated;
                 });
+
+                // Remove from Queue DB
+                await queueDb.removeItem(item.id);
+
             } catch (error) {
+                console.error(error);
                 setResults(prev => {
                     const updated = [...prev];
-                    updated[index] = {
-                        ...processingResults[i],
+                    updated[resultIndex] = {
+                        ...newResultsPlaceholder[i],
                         status: 'error',
-                        error: error instanceof Error ? error.message : 'OCR failed',
+                        error: 'Processing failed'
                     };
                     return updated;
                 });
 
-                // Mark as error
+                // Update DB status to error so it doesn't get stuck in 'processing' forever on reload
+                await queueDb.updateStatus(item.id, 'error');
+
                 setUploadProgress(prev => {
                     const updated = [...prev];
                     updated[i] = { ...updated[i], status: 'error', progress: 0 };
@@ -260,23 +239,69 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
         }
 
         setIsProcessing(false);
+        setResumeCount(0); // Clear resume prompt
 
-        // Clear progress after 3 seconds
-        setTimeout(() => {
-            setUploadProgress([]);
-        }, 3000);
+        setTimeout(() => setUploadProgress([]), 3000);
 
-        // Batch complete notification
         if (isAutoMode) {
-            onBatchComplete?.(); // Auto mode: refresh immediately after saving
+            onBatchComplete?.();
             setResults([]);
-        } else if (newResults.length > 0) {
-            // Manual mode: open review modal
-            // onBatchComplete will be called after user finishes reviewing (in handleSaveAndNext/handleSkip)
+        } else if (results.length > 0 || pendingItems.length > 0) {
+            // Re-evaluate if we should show review mode. 
+            // Since we appended to results, check if we have completed items.
             setIsReviewMode(true);
-            setCurrentIndex(0);
+            // If starting from 0, currentIndex is 0. 
+            // If appending, user might be reviewing previous batch? 
+            // Simplification: Always jump to the first of the NEW batch? 
+            // Or just 0. safely 0.
+            if (currentIndex === 0) setCurrentIndex(0);
         }
-    }, [results.length, useEnhancement, isAutoMode, onCreateTransaction, onBatchComplete, processedSignatures]);
+
+    }, [isAutoMode, onCreateTransaction, onBatchComplete, results.length, useEnhancement, currentIndex]);
+
+
+    const processFiles = useCallback(async (files: File[]) => {
+        if (files.length === 0) return;
+
+        // Filter duplicates and queue
+        const uniqueFiles: File[] = [];
+        const ignoredFiles: string[] = [];
+
+        for (const file of files) {
+            const signature = `${file.name}-${file.size}`;
+            const isDbDuplicate = existingReceipts.some(r => r.fileName === file.name);
+
+            if (processedSignatures.has(signature) || isDbDuplicate) {
+                ignoredFiles.push(file.name);
+            } else {
+                uniqueFiles.push(file);
+                setProcessedSignatures(prev => new Set(prev).add(signature));
+            }
+        }
+
+        if (ignoredFiles.length > 0) alert(`Skipped ${ignoredFiles.length} duplicates`);
+        if (uniqueFiles.length === 0) return;
+
+        // Add to Queue DB
+        for (const file of uniqueFiles) {
+            await queueDb.addItem({
+                id: uuid(),
+                file,
+                fileName: file.name,
+                status: 'queued',
+                timestamp: Date.now()
+            });
+        }
+
+        // Trigger processing
+        processQueue();
+
+    }, [existingReceipts, processedSignatures, processQueue]);
+
+
+    const handleResume = () => {
+        processQueue();
+    };
 
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -322,20 +347,16 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
         const result = completedResults[currentIndex];
         if (!result || !result.editedAmount) return;
 
-        await onCreateTransaction?.(result); // Wait for save to complete
+        await onCreateTransaction?.(result);
 
-        // Advance to next receipt if available
-        // Note: completedResults is derived from results state.
-        // We're iterating through them.
         if (currentIndex < completedResults.length - 1) {
             setCurrentIndex(currentIndex + 1);
         } else {
-            // Last item - wait a bit for database to settle before refreshing
             setIsReviewMode(false);
             setResults([]);
             setTimeout(() => {
                 onBatchComplete?.();
-            }, 100); // Small delay to ensure DB writes complete
+            }, 100);
         }
     };
 
@@ -352,7 +373,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
             setResults([]);
             setTimeout(() => {
                 onBatchComplete?.();
-            }, 100); // Small delay to ensure DB writes complete
+            }, 100);
         }
     };
 
@@ -460,6 +481,27 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Resume Banner */}
+            {resumeCount > 0 && !isProcessing && (
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <Loader2 className="w-5 h-5 text-blue-400" />
+                        <div>
+                            <h4 className="font-medium text-white">Interrupted Uploads Found</h4>
+                            <p className="text-sm text-gray-400">
+                                {resumeCount} receipt{resumeCount > 1 ? 's' : ''} from a previous session are waiting.
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={handleResume}
+                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors shadow-lg shadow-blue-500/20"
+                    >
+                        Resume Processing
+                    </button>
                 </div>
             )}
 
