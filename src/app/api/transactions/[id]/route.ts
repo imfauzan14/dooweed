@@ -4,20 +4,20 @@ import { transactions, receipts } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { convertCurrency } from '@/lib/currency';
 
-const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
+import { requireAuth } from '@/lib/auth';
 
-// GET /api/transactions/[id] - Get a single transaction
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await requireAuth(request);
         const { id } = await params;
 
         const result = await db
             .select()
             .from(transactions)
-            .where(and(eq(transactions.id, id), eq(transactions.userId, DEFAULT_USER_ID)))
+            .where(and(eq(transactions.id, id), eq(transactions.userId, user.id)))
             .limit(1);
 
         if (result.length === 0) {
@@ -34,12 +34,12 @@ export async function GET(
     }
 }
 
-// PUT /api/transactions/[id] - Update a transaction
 export async function PUT(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await requireAuth(request);
         const { id } = await params;
         const body = await request.json();
         const { type, amount, currency, categoryId, description, date, receiptId } = body;
@@ -48,7 +48,7 @@ export async function PUT(
         const existing = await db
             .select()
             .from(transactions)
-            .where(and(eq(transactions.id, id), eq(transactions.userId, DEFAULT_USER_ID)))
+            .where(and(eq(transactions.id, id), eq(transactions.userId, user.id)))
             .limit(1);
 
         if (existing.length === 0) {
@@ -105,19 +105,19 @@ export async function PUT(
     }
 }
 
-// DELETE /api/transactions/[id] - Delete a transaction
 export async function DELETE(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await requireAuth(request);
         const { id } = await params;
 
         // Check if transaction exists
         const existing = await db
             .select()
             .from(transactions)
-            .where(and(eq(transactions.id, id), eq(transactions.userId, DEFAULT_USER_ID)))
+            .where(and(eq(transactions.id, id), eq(transactions.userId, user.id)))
             .limit(1);
 
         if (existing.length === 0) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth';
 import { db } from '@/db';
 import { recurringTransactions, transactions, categories } from '@/db/schema';
 import { eq, and, lte, desc } from 'drizzle-orm';
@@ -6,11 +7,10 @@ import { v4 as uuid } from 'uuid';
 import { addDays, addWeeks, addMonths, addYears, format, parseISO, isBefore } from 'date-fns';
 import { convertCurrency } from '@/lib/currency';
 
-const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
-
 // GET /api/recurring - List all recurring transactions
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const result = await db
             .select({
                 recurring: recurringTransactions,
@@ -18,7 +18,7 @@ export async function GET() {
             })
             .from(recurringTransactions)
             .leftJoin(categories, eq(recurringTransactions.categoryId, categories.id))
-            .where(eq(recurringTransactions.userId, DEFAULT_USER_ID))
+            .where(eq(recurringTransactions.userId, user.id))
             .orderBy(desc(recurringTransactions.createdAt));
 
         const data = result.map(({ recurring, category }) => ({
@@ -28,6 +28,9 @@ export async function GET() {
 
         return NextResponse.json({ data });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error fetching recurring transactions:', error);
         return NextResponse.json({ error: 'Failed to fetch recurring transactions' }, { status: 500 });
     }
@@ -36,6 +39,7 @@ export async function GET() {
 // POST /api/recurring - Create a new recurring transaction
 export async function POST(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const body = await request.json();
         const {
             type,
@@ -60,7 +64,7 @@ export async function POST(request: NextRequest) {
 
         const newRecurring = {
             id,
-            userId: DEFAULT_USER_ID,
+            userId: user.id,
             type: type as 'income' | 'expense',
             amount: parseFloat(amount),
             currency,
@@ -76,6 +80,9 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({ data: newRecurring }, { status: 201 });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error creating recurring transaction:', error);
         return NextResponse.json({ error: 'Failed to create recurring transaction' }, { status: 500 });
     }
@@ -84,6 +91,7 @@ export async function POST(request: NextRequest) {
 // PUT /api/recurring - Update a recurring transaction
 export async function PUT(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const body = await request.json();
         const { id, amount, categoryId, description, frequency, endDate, isActive } = body;
 
@@ -94,7 +102,7 @@ export async function PUT(request: NextRequest) {
         const existing = await db
             .select()
             .from(recurringTransactions)
-            .where(and(eq(recurringTransactions.id, id), eq(recurringTransactions.userId, DEFAULT_USER_ID)))
+            .where(and(eq(recurringTransactions.id, id), eq(recurringTransactions.userId, user.id)))
             .limit(1);
 
         if (existing.length === 0) {
@@ -119,6 +127,9 @@ export async function PUT(request: NextRequest) {
 
         return NextResponse.json({ data: updated[0] });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error updating recurring transaction:', error);
         return NextResponse.json({ error: 'Failed to update recurring transaction' }, { status: 500 });
     }
@@ -127,6 +138,7 @@ export async function PUT(request: NextRequest) {
 // DELETE /api/recurring - Delete a recurring transaction
 export async function DELETE(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const { searchParams } = new URL(request.url);
         const id = searchParams.get('id');
 
@@ -137,7 +149,7 @@ export async function DELETE(request: NextRequest) {
         const existing = await db
             .select()
             .from(recurringTransactions)
-            .where(and(eq(recurringTransactions.id, id), eq(recurringTransactions.userId, DEFAULT_USER_ID)))
+            .where(and(eq(recurringTransactions.id, id), eq(recurringTransactions.userId, user.id)))
             .limit(1);
 
         if (existing.length === 0) {
@@ -148,14 +160,18 @@ export async function DELETE(request: NextRequest) {
 
         return NextResponse.json({ message: 'Recurring transaction deleted successfully' });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error deleting recurring transaction:', error);
         return NextResponse.json({ error: 'Failed to delete recurring transaction' }, { status: 500 });
     }
 }
 
 // PATCH /api/recurring - Process due recurring transactions
-export async function PATCH() {
+export async function PATCH(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const today = format(new Date(), 'yyyy-MM-dd');
 
         // Find all active recurring transactions due today or earlier
@@ -164,7 +180,7 @@ export async function PATCH() {
             .from(recurringTransactions)
             .where(
                 and(
-                    eq(recurringTransactions.userId, DEFAULT_USER_ID),
+                    eq(recurringTransactions.userId, user.id),
                     eq(recurringTransactions.isActive, true),
                     lte(recurringTransactions.nextDate, today)
                 )
@@ -193,7 +209,7 @@ export async function PATCH() {
 
             await db.insert(transactions).values({
                 id: transactionId,
-                userId: DEFAULT_USER_ID,
+                userId: user.id,
                 type: recurring.type,
                 amount: recurring.amount,
                 currency: recurring.currency,
@@ -239,6 +255,9 @@ export async function PATCH() {
             createdTransactions,
         });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error processing recurring transactions:', error);
         return NextResponse.json({ error: 'Failed to process recurring transactions' }, { status: 500 });
     }

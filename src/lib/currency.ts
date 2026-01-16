@@ -32,8 +32,9 @@ export async function getExchangeRate(from: string, to: string): Promise<number>
     if (from === to) return 1;
 
     try {
+        // Use internal API which handles caching and Frankfurter interaction
         const response = await fetch(
-            `${FRANKFURTER_API}/latest?from=${from}&to=${to}`,
+            `/api/exchange-rates?from=${from}&to=${to}`,
             { signal: AbortSignal.timeout(5000) } // 5s timeout
         );
 
@@ -41,21 +42,22 @@ export async function getExchangeRate(from: string, to: string): Promise<number>
             throw new Error(`Failed to fetch exchange rate: ${response.statusText}`);
         }
 
-        const data: ExchangeRateResponse = await response.json();
-        return data.rates[to] || 1;
+        const json = await response.json();
+        // The API returns { data: { rate: number, ... } }
+        return json.data.rate || 1;
     } catch (error) {
-        console.error('[Currency] Frankfurter API failed:', error);
+        console.error('[Currency] Internal API failed, falling back:', error);
 
-        // Try LLM fallback
+        // Try LLM fallback (client-side backup)
         try {
             const llmRate = await getLLMFallbackRate(from, to);
             console.log(`[Currency] Using LLM fallback rate: ${llmRate}`);
             return llmRate;
         } catch (llmError) {
             console.error('[Currency] LLM fallback failed:', llmError);
-            // Last resort: hardcoded rates
-            const hardcodedRate = getFallbackRate(from, to);
-            console.warn(`[Currency] Using hardcoded fallback: ${hardcodedRate}`);
+            // Last resort: database/hardcoded rates
+            const hardcodedRate = await getFallbackRate(from, to);
+            console.warn(`[Currency] Using database fallback: ${hardcodedRate}`);
             return hardcodedRate;
         }
     }
@@ -131,9 +133,9 @@ export async function convertCurrency(
                 return amount * llmRate;
             } catch (llmError) {
                 console.error('[Currency] LLM fallback failed:', llmError);
-                // Last resort: hardcoded rates
-                const fallbackRate = getFallbackRate(from, to);
-                console.warn(`[Currency] Using hardcoded fallback: ${fallbackRate}`);
+                // Last resort: database/hardcoded rates
+                const fallbackRate = await getFallbackRate(from, to);
+                console.warn(`[Currency] Using database fallback: ${fallbackRate}`);
                 return amount * fallbackRate;
             }
         }
@@ -150,39 +152,72 @@ export async function convertCurrency(
 }
 
 /**
- * Fallback exchange rates (updated Jan 16, 2026)
- * Last resort when both APIs and LLM fail
+ * Fallback exchange rates - fetches from database settings
+ * Falls back to compile-time defaults if database unavailable
  */
-function getFallbackRate(from: string, to: string): number {
-    const rates: Record<string, Record<string, number>> = {
-        'USD': { 'IDR': 16850, 'EUR': 0.93, 'GBP': 0.79, 'SGD': 1.35, 'JPY': 157, 'CNY': 7.25 },
-        'EUR': { 'IDR': 18150, 'USD': 1.08, 'GBP': 0.85, 'SGD': 1.46, 'JPY': 169 },
-        'GBP': { 'IDR': 21350, 'USD': 1.27, 'EUR': 1.18, 'SGD': 1.72 },
-        'SGD': { 'IDR': 12470, 'USD': 0.74, 'EUR': 0.68, 'GBP': 0.58 },
-        'JPY': { 'IDR': 107, 'USD': 0.0064, 'EUR': 0.0059 },
-        'CNY': { 'IDR': 2325, 'USD': 0.14, 'EUR': 0.13 },
-        'IDR': {
-            'USD': 1 / 16850,
-            'EUR': 1 / 18150,
-            'GBP': 1 / 21350,
-            'SGD': 1 / 12470,
-            'JPY': 1 / 107,
-            'CNY': 1 / 2325
-        },
-    };
+let cachedRates: Record<string, Record<string, number>> | null = null;
+let cacheTime: number = 0;
+const CACHE_TTL = 60000; // 1 minute cache
 
+const DEFAULT_RATES: Record<string, Record<string, number>> = {
+    'USD': { 'IDR': 16850, 'EUR': 0.93, 'GBP': 0.79, 'SGD': 1.35, 'JPY': 157, 'CNY': 7.25 },
+    'EUR': { 'IDR': 18150, 'USD': 1.08, 'GBP': 0.85, 'SGD': 1.46, 'JPY': 169 },
+    'GBP': { 'IDR': 21350, 'USD': 1.27, 'EUR': 1.18, 'SGD': 1.72 },
+    'SGD': { 'IDR': 12470, 'USD': 0.74, 'EUR': 0.68, 'GBP': 0.58 },
+    'JPY': { 'IDR': 107, 'USD': 0.0064, 'EUR': 0.0059 },
+    'CNY': { 'IDR': 2325, 'USD': 0.14, 'EUR': 0.13 },
+    'IDR': {
+        'USD': 1 / 16850,
+        'EUR': 1 / 18150,
+        'GBP': 1 / 21350,
+        'SGD': 1 / 12470,
+        'JPY': 1 / 107,
+        'CNY': 1 / 2325
+    },
+};
+
+async function getFallbackRate(from: string, to: string): Promise<number> {
     if (from === to) return 1;
 
+    // Use cached rates if fresh
+    const now = Date.now();
+    if (cachedRates !== null && (now - cacheTime) < CACHE_TTL) {
+        const rate = lookupRate(cachedRates, from, to);
+        if (rate) return rate;
+    }
+
+    // Fetch from database settings
+    try {
+        const response = await fetch('/api/settings?key=currencyFallbackRates');
+        if (response.ok) {
+            const data = await response.json();
+            const fetchedRates: Record<string, Record<string, number>> = data.data.value;
+            cachedRates = fetchedRates;
+            cacheTime = now;
+            const rate = lookupRate(fetchedRates, from, to);
+            if (rate) return rate;
+        }
+    } catch (error) {
+        console.error('[Currency] Failed to fetch fallback rates from settings:', error);
+    }
+
+    // Use compile-time defaults
+    const rate = lookupRate(DEFAULT_RATES, from, to);
+    if (rate) return rate;
+
+    console.warn(`[Currency] No fallback rate for ${from} → ${to}, using 1:1`);
+    return 1;
+}
+
+function lookupRate(rates: Record<string, Record<string, number>>, from: string, to: string): number | null {
     // Direct lookup
     if (rates[from]?.[to]) return rates[from][to];
 
-    // Inverse lookup with proper null check
+    // Inverse lookup
     const inverse = rates[to]?.[from];
     if (inverse && inverse !== 0) return 1 / inverse;
 
-    // Last resort: log warning and return 1
-    console.warn(`[Currency] No fallback rate for ${from} → ${to}, using 1:1`);
-    return 1;
+    return null;
 }
 
 /**

@@ -1,10 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { text, integer, real, sqliteTable, index } from 'drizzle-orm/sqlite-core';
 
-// Users table (for future multi-user support)
+// Users table
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
-  email: text('email').unique(),
+  email: text('email').notNull().unique(),
+  password: text('password').notNull(), // bcrypt hashed
   name: text('name'),
   defaultCurrency: text('default_currency').default('IDR'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
@@ -115,3 +116,40 @@ export type NewBudget = typeof budgets.$inferInsert;
 export type RecurringTransaction = typeof recurringTransactions.$inferSelect;
 export type NewRecurringTransaction = typeof recurringTransactions.$inferInsert;
 export type ExchangeRate = typeof exchangeRates.$inferSelect;
+
+// Settings table for app-level configuration
+export const settings = sqliteTable('settings', {
+  id: text('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  value: text('value').notNull(), // JSON string for complex values
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type Setting = typeof settings.$inferSelect;
+export type NewSetting = typeof settings.$inferInsert;
+
+// Sessions table for authentication
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+});
+
+export const currencyPreferences = sqliteTable('currency_preferences', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
+  fallbackOrder: text('fallback_order').notNull(), // JSON: ["api", "llm", "custom"]
+  enabledMethods: text('enabled_methods').notNull(), // JSON: ["api", "llm", "custom"]
+  customRates: text('custom_rates'), // JSON: {USD: {IDR: 16850}, ...}
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+});
+
+
+export type Session = typeof sessions.$inferSelect;
+export type NewSession = typeof sessions.$inferInsert;
+export type CurrencyPreference = typeof currencyPreferences.$inferSelect;
+export type NewCurrencyPreference = typeof currencyPreferences.$inferInsert;
+export type ExchangeRateCache = typeof exchangeRates.$inferSelect;
+export type NewExchangeRateCache = typeof exchangeRates.$inferInsert;

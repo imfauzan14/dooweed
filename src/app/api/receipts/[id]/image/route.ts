@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth';
 import { db } from '@/db';
 import { receipts } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
-
-const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
 
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await requireAuth(request);
         const { id } = await params;
 
         const result = await db
@@ -17,7 +17,7 @@ export async function GET(
                 imageBase64: receipts.imageBase64,
             })
             .from(receipts)
-            .where(and(eq(receipts.id, id), eq(receipts.userId, DEFAULT_USER_ID)))
+            .where(and(eq(receipts.id, id), eq(receipts.userId, user.id)))
             .limit(1);
 
         if (result.length === 0) {
@@ -44,6 +44,9 @@ export async function GET(
             },
         });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error serving receipt image:', error);
         return new NextResponse('Internal Server Error', { status: 500 });
     }

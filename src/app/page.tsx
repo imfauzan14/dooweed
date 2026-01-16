@@ -289,37 +289,34 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {/* Header with Month Selector */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Dooweed</h1>
-          <div className="flex items-center gap-3 mt-1">
-            <button
-              onClick={handlePrevMonth}
-              disabled={availableMonths.length === 0 || availableMonths.indexOf(format(currentDate, 'yyyy-MM')) === availableMonths.length - 1}
-              className={cn(
-                "p-1 rounded-lg transition-colors",
-                availableMonths.length === 0 || availableMonths.indexOf(format(currentDate, 'yyyy-MM')) === availableMonths.length - 1
-                  ? "text-gray-700 cursor-not-allowed"
-                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
-              )}
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <span className="text-lg font-medium text-white min-w-[140px] text-center">
-              {format(currentDate, 'MMMM yyyy')}
-            </span>
-            <button
-              onClick={handleNextMonth}
-              className={cn(
-                "p-1 rounded-lg transition-colors",
-                isSameMonth(currentDate, new Date())
-                  ? "text-gray-600 cursor-not-allowed"
-                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
-              )}
-              disabled={isSameMonth(currentDate, new Date())}
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handlePrevMonth}
+            disabled={availableMonths.length === 0 || availableMonths.indexOf(format(currentDate, 'yyyy-MM')) === availableMonths.length - 1}
+            className={cn(
+              "p-1 rounded-lg transition-colors",
+              availableMonths.length === 0 || availableMonths.indexOf(format(currentDate, 'yyyy-MM')) === availableMonths.length - 1
+                ? "text-gray-700 cursor-not-allowed"
+                : "text-gray-400 hover:bg-gray-800 hover:text-white"
+            )}
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <span className="text-lg font-medium text-white min-w-[140px] text-center">
+            {format(currentDate, 'MMMM yyyy')}
+          </span>
+          <button
+            onClick={handleNextMonth}
+            className={cn(
+              "p-1 rounded-lg transition-colors",
+              isSameMonth(currentDate, new Date())
+                ? "text-gray-600 cursor-not-allowed"
+                : "text-gray-400 hover:bg-gray-800 hover:text-white"
+            )}
+            disabled={isSameMonth(currentDate, new Date())}
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
         </div>
 
         <button

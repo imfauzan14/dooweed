@@ -6,11 +6,12 @@ import { v4 as uuid } from 'uuid';
 import { convertCurrency } from '@/lib/currency';
 import { transactionSchema, validateInput, validatePagination } from '@/lib/validation';
 
-const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
+import { requireAuth } from '@/lib/auth';
 
 // GET /api/transactions - List transactions with optional filters
 export async function GET(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const { searchParams } = new URL(request.url);
         const startDate = searchParams.get('startDate');
         const endDate = searchParams.get('endDate');
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
         });
 
         // Build query conditions
-        const conditions = [eq(transactions.userId, DEFAULT_USER_ID)];
+        const conditions = [eq(transactions.userId, user.id)];
 
         if (startDate) {
             conditions.push(gte(transactions.date, startDate));
@@ -60,6 +61,9 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({ data, count: data.length });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error fetching transactions:', error);
         return NextResponse.json(
             { error: 'Failed to fetch transactions' },
@@ -71,6 +75,7 @@ export async function GET(request: NextRequest) {
 // POST /api/transactions - Create a new transaction
 export async function POST(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const body = await request.json();
         const {
             type,
@@ -114,7 +119,7 @@ export async function POST(request: NextRequest) {
         const id = uuid();
         const newTransaction = {
             id,
-            userId: DEFAULT_USER_ID,
+            userId: user.id,
             type: validData.type,
             amount: validData.amount,
             currency: validData.currency,
@@ -130,6 +135,9 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({ data: newTransaction }, { status: 201 });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error creating transaction:', error);
         return NextResponse.json(
             { error: 'Failed to create transaction' },

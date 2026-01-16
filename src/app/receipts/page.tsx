@@ -64,6 +64,9 @@ export default function ReceiptsPage() {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isDeleting, setIsDeleting] = useState(false);
 
+    // Fallback rates for currency display
+    const [fallbackRates, setFallbackRates] = useState<Record<string, Record<string, number>>>({});
+
 
     // Filters
     const [searchQuery, setSearchQuery] = useState('');
@@ -74,6 +77,7 @@ export default function ReceiptsPage() {
 
     useEffect(() => {
         fetchData();
+        fetchFallbackRates();
     }, []);
 
     const fetchData = async () => {
@@ -95,6 +99,25 @@ export default function ReceiptsPage() {
             console.error('Failed to fetch data:', error);
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const fetchFallbackRates = async () => {
+        try {
+            const response = await fetch('/api/settings?key=currencyFallbackRates');
+            const data = await response.json();
+            if (data.success) {
+                setFallbackRates(data.data.value);
+            }
+        } catch (error) {
+            console.error('Failed to fetch fallback rates:', error);
+            // Use compile-time defaults if fetch fails
+            setFallbackRates({
+                USD: { IDR: 16850 },
+                EUR: { IDR: 18150 },
+                GBP: { IDR: 21350 },
+                SGD: { IDR: 12470 },
+            });
         }
     };
 
@@ -437,7 +460,7 @@ export default function ReceiptsPage() {
                             </span>
                             {receipt.ocrCurrency && receipt.ocrCurrency !== 'IDR' && receipt.ocrAmount && (
                                 <span className="text-[10px] sm:text-xs text-gray-500">
-                                    ~{formatCurrency(receipt.ocrAmount * (receipt.ocrCurrency === 'USD' ? 16900 : 1), 'IDR')}
+                                    ~{formatCurrency(receipt.ocrAmount * (fallbackRates[receipt.ocrCurrency]?.IDR || 1), 'IDR')}
                                 </span>
                             )}
                         </div>

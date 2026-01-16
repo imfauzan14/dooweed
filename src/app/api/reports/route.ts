@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth';
 import { db } from '@/db';
 import { transactions, categories, receipts } from '@/db/schema';
 import { eq, and, gte, lte, sql, desc, or, isNull } from 'drizzle-orm';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { generateTransactionCSV } from '@/lib/export';
 
-const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
-
 // GET /api/reports - Get dashboard summary data
 export async function GET(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const { searchParams } = new URL(request.url);
         const type = searchParams.get('type') || 'summary';
         const months = parseInt(searchParams.get('months') || '6');
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
                     month: sql<string>`strftime('%Y-%m', date)`,
                 })
                 .from(transactions)
-                .where(eq(transactions.userId, DEFAULT_USER_ID))
+                .where(eq(transactions.userId, user.id))
                 .groupBy(sql`strftime('%Y-%m', date)`)
                 .orderBy(desc(sql`strftime('%Y-%m', date)`));
 
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
                 .leftJoin(receipts, eq(transactions.receiptId, receipts.id))
                 .where(
                     and(
-                        eq(transactions.userId, DEFAULT_USER_ID),
+                        eq(transactions.userId, user.id),
                         gte(transactions.date, startDate),
                         lte(transactions.date, endDate),
                         // Exclude transactions from unverified receipts
@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
                 .leftJoin(receipts, eq(transactions.receiptId, receipts.id))
                 .where(
                     and(
-                        eq(transactions.userId, DEFAULT_USER_ID),
+                        eq(transactions.userId, user.id),
                         gte(transactions.date, startDate),
                         lte(transactions.date, endDate),
                         // Exclude unverified receipts
@@ -139,7 +139,7 @@ export async function GET(request: NextRequest) {
                 .from(transactions)
                 .where(
                     and(
-                        eq(transactions.userId, DEFAULT_USER_ID),
+                        eq(transactions.userId, user.id),
                         gte(transactions.date, startDate),
                         lte(transactions.date, endDate)
                     )
@@ -189,7 +189,7 @@ export async function GET(request: NextRequest) {
                 .leftJoin(receipts, eq(transactions.receiptId, receipts.id))
                 .where(
                     and(
-                        eq(transactions.userId, DEFAULT_USER_ID),
+                        eq(transactions.userId, user.id),
                         gte(transactions.date, startDate),
                         lte(transactions.date, endDate),
                         or(
@@ -211,7 +211,7 @@ export async function GET(request: NextRequest) {
                 .from(transactions)
                 .where(
                     and(
-                        eq(transactions.userId, DEFAULT_USER_ID),
+                        eq(transactions.userId, user.id),
                         gte(transactions.date, startDate),
                         lte(transactions.date, endDate)
                     )
@@ -221,7 +221,7 @@ export async function GET(request: NextRequest) {
             const allCategories = await db
                 .select()
                 .from(categories)
-                .where(eq(categories.userId, DEFAULT_USER_ID));
+                .where(eq(categories.userId, user.id));
 
             const csv = generateTransactionCSV(allTransactions, allCategories);
 
@@ -235,6 +235,9 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({ error: 'Invalid report type' }, { status: 400 });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error generating report:', error);
         return NextResponse.json({ error: 'Failed to generate report' }, { status: 500 });
     }

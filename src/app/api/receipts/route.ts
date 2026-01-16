@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth';
+
 import { db } from '@/db';
 import { receipts } from '@/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
-const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
-
 // GET /api/receipts - List all receipts
 export async function GET(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const { searchParams } = new URL(request.url);
         const verifiedOnly = searchParams.get('verified') === 'true';
         const limit = parseInt(searchParams.get('limit') || '50');
 
-        let conditions = [eq(receipts.userId, DEFAULT_USER_ID)];
+        const conditions = [eq(receipts.userId, user.id)];
         if (verifiedOnly) {
             conditions.push(eq(receipts.verified, true));
         }
@@ -39,6 +40,9 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({ data: result });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error fetching receipts:', error);
         return NextResponse.json({ error: 'Failed to fetch receipts' }, { status: 500 });
     }
@@ -47,6 +51,7 @@ export async function GET(request: NextRequest) {
 // POST /api/receipts - Upload a new receipt
 export async function POST(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const body = await request.json();
         const {
             imageBase64,
@@ -68,7 +73,7 @@ export async function POST(request: NextRequest) {
         const id = uuid();
         const newReceipt = {
             id,
-            userId: DEFAULT_USER_ID,
+            userId: user.id,
             imageBase64,
             ocrRawText: ocrRawText || null,
             ocrMerchant: ocrMerchant || null,
@@ -87,6 +92,9 @@ export async function POST(request: NextRequest) {
         const { imageBase64: _, ...responseData } = newReceipt;
         return NextResponse.json({ data: { ...responseData, id } }, { status: 201 });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error uploading receipt:', error);
         return NextResponse.json({ error: 'Failed to upload receipt' }, { status: 500 });
     }
@@ -95,6 +103,7 @@ export async function POST(request: NextRequest) {
 // POST /api/receipts/batch - Upload multiple receipts
 export async function PATCH(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const body = await request.json();
         const { receipts: receiptData } = body;
 
@@ -108,7 +117,7 @@ export async function PATCH(request: NextRequest) {
             const id = uuid();
             await db.insert(receipts).values({
                 id,
-                userId: DEFAULT_USER_ID,
+                userId: user.id,
                 imageBase64: receipt.imageBase64,
                 ocrRawText: receipt.ocrRawText || null,
                 ocrMerchant: receipt.ocrMerchant || null,
@@ -126,6 +135,9 @@ export async function PATCH(request: NextRequest) {
             data: { insertedCount: insertedIds.length, ids: insertedIds },
         });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error batch uploading receipts:', error);
         return NextResponse.json({ error: 'Failed to batch upload receipts' }, { status: 500 });
     }

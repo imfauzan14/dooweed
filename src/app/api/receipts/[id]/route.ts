@@ -1,22 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth';
 import { db } from '@/db';
 import { receipts, transactions } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 
-const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
-
-// GET /api/receipts/[id] - Get a single receipt with full image
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await requireAuth(request);
         const { id } = await params;
 
         const result = await db
             .select()
             .from(receipts)
-            .where(and(eq(receipts.id, id), eq(receipts.userId, DEFAULT_USER_ID)))
+            .where(and(eq(receipts.id, id), eq(receipts.userId, user.id)))
             .limit(1);
 
         if (result.length === 0) {
@@ -25,17 +24,20 @@ export async function GET(
 
         return NextResponse.json({ data: result[0] });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error fetching receipt:', error);
         return NextResponse.json({ error: 'Failed to fetch receipt' }, { status: 500 });
     }
 }
 
-// PATCH /api/receipts/[id] - Update receipt (verify OCR corrections)
 export async function PATCH(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await requireAuth(request);
         const { id } = await params;
         const body = await request.json();
         const { ocrMerchant, ocrDate, ocrAmount, ocrCurrency, verified, isAutomated } = body;
@@ -43,7 +45,7 @@ export async function PATCH(
         const existing = await db
             .select()
             .from(receipts)
-            .where(and(eq(receipts.id, id), eq(receipts.userId, DEFAULT_USER_ID)))
+            .where(and(eq(receipts.id, id), eq(receipts.userId, user.id)))
             .limit(1);
 
         if (existing.length === 0) {
@@ -77,23 +79,26 @@ export async function PATCH(
 
         return NextResponse.json({ data: updated[0] });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error updating receipt:', error);
         return NextResponse.json({ error: 'Failed to update receipt' }, { status: 500 });
     }
 }
 
-// DELETE /api/receipts/[id] - Delete a receipt
 export async function DELETE(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const user = await requireAuth(request);
         const { id } = await params;
 
         const existing = await db
             .select()
             .from(receipts)
-            .where(and(eq(receipts.id, id), eq(receipts.userId, DEFAULT_USER_ID)))
+            .where(and(eq(receipts.id, id), eq(receipts.userId, user.id)))
             .limit(1);
 
         if (existing.length === 0) {
@@ -109,6 +114,9 @@ export async function DELETE(
 
         return NextResponse.json({ message: 'Receipt deleted successfully' });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error deleting receipt:', error);
         return NextResponse.json({ error: 'Failed to delete receipt' }, { status: 500 });
     }

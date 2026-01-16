@@ -1,47 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { categories, users } from '@/db/schema';
+import { categories } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import { seedCategories } from '@/lib/seed';
-
-const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'default-user';
-
-// Ensure default user exists (for foreign key constraints)
-async function ensureDefaultUser() {
-    const existingUser = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, DEFAULT_USER_ID))
-        .limit(1);
-
-    if (existingUser.length === 0) {
-        await db.insert(users).values({
-            id: DEFAULT_USER_ID,
-            email: 'default@example.com',
-            name: 'Default User',
-            defaultCurrency: 'IDR',
-        });
-    }
-}
+import { requireAuth } from '@/lib/auth';
 
 // GET /api/categories - List all categories
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
+
         const result = await db
             .select()
             .from(categories)
-            .where(eq(categories.userId, DEFAULT_USER_ID));
+            .where(eq(categories.userId, user.id));
 
         // If no categories exist, seed default ones
         if (result.length === 0) {
-            // Ensure default user exists first (for foreign key)
-            await ensureDefaultUser();
-
             const toInsert = seedCategories.map((cat) => ({
                 ...cat,
                 id: uuid(),
-                userId: DEFAULT_USER_ID,
+                userId: user.id,
             }));
 
             await db.insert(categories).values(toInsert);
@@ -51,6 +31,9 @@ export async function GET() {
 
         return NextResponse.json({ data: result });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error fetching categories:', error);
         return NextResponse.json(
             { error: 'Failed to fetch categories' },
@@ -62,6 +45,7 @@ export async function GET() {
 // POST /api/categories - Create a new category
 export async function POST(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const body = await request.json();
         const { name, type, icon, color } = body;
 
@@ -82,7 +66,7 @@ export async function POST(request: NextRequest) {
         const id = uuid();
         const newCategory = {
             id,
-            userId: DEFAULT_USER_ID,
+            userId: user.id,
             name,
             type: type as 'income' | 'expense',
             icon: icon || '📁',
@@ -93,6 +77,9 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({ data: newCategory }, { status: 201 });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error creating category:', error);
         return NextResponse.json(
             { error: 'Failed to create category' },
@@ -101,9 +88,10 @@ export async function POST(request: NextRequest) {
     }
 }
 
-// PUT /api/categories - Update a category (bulk update for drag-n-drop reorder)
+// PUT /api/categories - Update a category
 export async function PUT(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const body = await request.json();
         const { id, name, icon, color } = body;
 
@@ -114,7 +102,7 @@ export async function PUT(request: NextRequest) {
         const existing = await db
             .select()
             .from(categories)
-            .where(and(eq(categories.id, id), eq(categories.userId, DEFAULT_USER_ID)))
+            .where(and(eq(categories.id, id), eq(categories.userId, user.id)))
             .limit(1);
 
         if (existing.length === 0) {
@@ -136,6 +124,9 @@ export async function PUT(request: NextRequest) {
 
         return NextResponse.json({ data: updated[0] });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error updating category:', error);
         return NextResponse.json(
             { error: 'Failed to update category' },
@@ -147,6 +138,7 @@ export async function PUT(request: NextRequest) {
 // DELETE /api/categories - Delete a category
 export async function DELETE(request: NextRequest) {
     try {
+        const user = await requireAuth(request);
         const { searchParams } = new URL(request.url);
         const id = searchParams.get('id');
 
@@ -157,7 +149,7 @@ export async function DELETE(request: NextRequest) {
         const existing = await db
             .select()
             .from(categories)
-            .where(and(eq(categories.id, id), eq(categories.userId, DEFAULT_USER_ID)))
+            .where(and(eq(categories.id, id), eq(categories.userId, user.id)))
             .limit(1);
 
         if (existing.length === 0) {
@@ -168,6 +160,9 @@ export async function DELETE(request: NextRequest) {
 
         return NextResponse.json({ message: 'Category deleted successfully' });
     } catch (error) {
+        if (error instanceof Error && error.message === 'Unauthorized') {
+            return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
         console.error('Error deleting category:', error);
         return NextResponse.json(
             { error: 'Failed to delete category' },
