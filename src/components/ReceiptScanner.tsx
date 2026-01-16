@@ -87,8 +87,16 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
         const pendingItems = await queueDb.getPendingItems();
         if (pendingItems.length === 0) return;
 
+        // Restore mode from queue (use the first item as reference)
+        const savedMode = pendingItems[0].isAutoMode;
+        if (savedMode !== undefined) {
+            setIsAutoMode(savedMode);
+            // If saved mode was Auto, we don't need review mode.
+            // If saved mode was Manual, and we are processing, we typically don't show review until done.
+        }
+
         setIsProcessing(true);
-        if (!isAutoMode) setIsReviewMode(false);
+        if (!savedMode && !isAutoMode) setIsReviewMode(false);
 
         // Sync local state with queue
         const initialProgress: UploadProgress[] = pendingItems.map(item => ({
@@ -289,18 +297,26 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
                 file,
                 fileName: file.name,
                 status: 'queued',
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                isAutoMode: isAutoMode // Persist current mode
             });
         }
 
         // Trigger processing
         processQueue();
 
-    }, [existingReceipts, processedSignatures, processQueue]);
+    }, [existingReceipts, processedSignatures, processQueue, isAutoMode]);
 
 
     const handleResume = () => {
         processQueue();
+    };
+
+    const handleDiscard = async () => {
+        if (confirm('Are you sure you want to discard these interrupted uploads?')) {
+            await queueDb.clearQueue();
+            setResumeCount(0);
+        }
     };
 
     const handleDrop = useCallback((e: React.DragEvent) => {
@@ -486,7 +502,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
 
             {/* Resume Banner */}
             {resumeCount > 0 && !isProcessing && (
-                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-center justify-between">
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 flex items-center justify-between animate-in slide-in-from-top-2">
                     <div className="flex items-center gap-3">
                         <Loader2 className="w-5 h-5 text-blue-400" />
                         <div>
@@ -496,12 +512,20 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, on
                             </p>
                         </div>
                     </div>
-                    <button
-                        onClick={handleResume}
-                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors shadow-lg shadow-blue-500/20"
-                    >
-                        Resume Processing
-                    </button>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={handleDiscard}
+                            className="px-4 py-2 hover:bg-red-500/10 text-red-400 hover:text-red-300 rounded-lg font-medium transition-colors"
+                        >
+                            Discard
+                        </button>
+                        <button
+                            onClick={handleResume}
+                            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors shadow-lg shadow-blue-500/20"
+                        >
+                            Resume
+                        </button>
+                    </div>
                 </div>
             )}
 

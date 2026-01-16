@@ -8,6 +8,7 @@ export interface QueenItem {
     fileName: string;
     status: 'queued' | 'processing' | 'error' | 'completed';
     timestamp: number;
+    isAutoMode?: boolean; // Persist the mode preference
 }
 
 export const queueDb = {
@@ -24,6 +25,18 @@ export const queueDb = {
                     db.createObjectStore(STORE_NAME, { keyPath: 'id' });
                 }
             };
+        });
+    },
+
+    async clearQueue(): Promise<void> {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction(STORE_NAME, 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+            const request = store.clear(); // Wipes everything
+
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
         });
     },
 
