@@ -426,8 +426,13 @@ export default function DashboardPage() {
                       ) : (
                         <ArrowDownRight className="w-3 h-3 sm:w-4 sm:h-4" />
                       )}
-                      {formatCurrency(t.amountInBase || t.amount, 'IDR')}
+                      {formatCurrency(t.amount, t.currency || 'IDR')}
                     </p>
+                    {t.currency && t.currency !== 'IDR' && t.amountInBase && (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        ~{formatCurrency(t.amountInBase, 'IDR')}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}

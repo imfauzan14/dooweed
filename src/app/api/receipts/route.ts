@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
                 ocrAmount: receipts.ocrAmount,
                 ocrCurrency: receipts.ocrCurrency,
                 ocrConfidence: receipts.ocrConfidence,
+                fileName: receipts.fileName,
                 verified: receipts.verified,
                 createdAt: receipts.createdAt,
                 // Don't include base64 in list for performance
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
             ocrAmount,
             ocrCurrency,
             ocrConfidence,
+            fileName,
             verified,
         } = body;
 
@@ -72,6 +74,7 @@ export async function POST(request: NextRequest) {
             ocrAmount: ocrAmount ? parseFloat(ocrAmount) : null,
             ocrCurrency: ocrCurrency || null,
             ocrConfidence: ocrConfidence ? parseFloat(ocrConfidence) : null,
+            fileName: fileName || null,
             verified: verified || false,
         };
 

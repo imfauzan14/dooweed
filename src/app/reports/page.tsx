@@ -52,7 +52,7 @@ export default function ReportsPage() {
             if (customRange) {
                 query = `startDate=${customRange.start}&endDate=${customRange.end}`;
             } else {
-                query = `months=${months}`;
+                query = `months=${months === 0 ? 'all' : months}`;
             }
 
             const [monthlyRes, categoryRes] = await Promise.all([
@@ -79,7 +79,7 @@ export default function ReportsPage() {
         if (customRange) {
             query = `startDate=${customRange.start}&endDate=${customRange.end}`;
         } else {
-            query = `months=${months}`;
+            query = `months=${months === 0 ? 'all' : months}`;
         }
         window.open(`/api/reports?type=export&${query}`, '_blank');
     };

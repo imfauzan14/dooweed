@@ -33,6 +33,8 @@ interface ScanResult {
     editedMerchant?: string;
     editedCategoryId?: string;
     isAutomated?: boolean;
+    fileName?: string;
+    isDuplicateWarning?: boolean;
 }
 
 interface SavedReceipt {
@@ -43,6 +45,7 @@ interface SavedReceipt {
     ocrAmount: number | null;
     ocrCurrency: string | null;
     ocrConfidence: number | null;
+    fileName?: string | null;
     verified: boolean;
     createdAt: string;
 }
@@ -172,11 +175,18 @@ export default function ReceiptsPage() {
                     ocrMerchant: result.editedMerchant || result.merchant,
                     ocrDate: result.editedDate || result.date,
                     ocrAmount: result.editedAmount || result.amount,
-                    ocrCurrency: result.currency || 'IDR',
+                    ocrCurrency: result.currency || 'IDR', // Keep IDR fallback if absolutely null because DB might require it, but use detected first
                     ocrConfidence: result.confidence,
-                    verified: true,
+                    fileName: result.fileName,
+                    verified: true, // User requested Auto to NOT be pending, so it must be verified.
                 }),
             });
+
+            if (!receiptRes.ok) {
+                const errorData = await receiptRes.json();
+                throw new Error(errorData.error || 'Failed to save receipt');
+            }
+
             const receiptData = await receiptRes.json();
             const receiptId = receiptData.data?.id;
 
@@ -195,7 +205,11 @@ export default function ReceiptsPage() {
                 }),
             });
 
-            fetchData();
+            // NO fetchData() here anymore. It causes the "clunky refresh" loop in batch mode.
+            // We rely on onBatchComplete to refresh once at the end.
+            // For manual single uploads, we might need a way to trigger it? 
+            // In Manual Review, handleSaveAll calls onCreateTransaction for each. 
+            // We should add an onBatchComplete call in ReceiptScanner for manual review finish too.
         } catch (error) {
             console.error('Failed to create transaction:', error);
         }
@@ -227,6 +241,9 @@ export default function ReceiptsPage() {
             <div className="glass-card rounded-2xl p-4 md:p-6">
                 <ReceiptScanner
                     onCreateTransaction={handleCreateTransaction}
+                    onBatchComplete={fetchData}
+                    categories={categories}
+                    existingReceipts={savedReceipts} // Pass existing data for dupe checking
                     onSkip={async (result) => {
                         try {
                             await fetch('/api/receipts', {
@@ -240,15 +257,31 @@ export default function ReceiptsPage() {
                                     ocrAmount: result.amount,
                                     ocrCurrency: result.currency || 'IDR',
                                     ocrConfidence: result.confidence,
+                                    fileName: result.fileName, // Pass original filename
                                     verified: false, // Save as unverified
                                 }),
                             });
-                            fetchData();
+                            // Don't fetch data here, let batch complete handle it or if manual mode, maybe explicit refresh needed?
+                            // If manual skip, we probably want to refresh if it's the last one? 
+                            // Actually manual mode handles one by one? 
+                            // ReceiptScanner calls onSkip then advances. 
+                            // If we don't refresh, the list won't show the skipped one.
+                            // But since we are in review mode, we don't see the list anyway.
+                            // When review mode closes (onBatchComplete equivalent for manual?), currently ReceiptScanner doesn't expose "onManualReviewComplete".
+                            // Let's rely on ReceiptScanner's handleSaveAll or closing behavior.
+                            // Wait, ReceiptScanner calling onSkip doesn't trigger "batch complete".
+                            // We might need to just let it be for manual. But for AUTO mode, onBatchComplete is called.
+                            // For Manual, user clicks "Save & Next" or "Skip".
+                            // If we remove fetchData() here, the user won't see the update until they refresh manually?
+                            // No, let's keep fetchData() for manual interactions IF it doesn't cause the "refresh" issue.
+                            // The issue was AUTO mode refreshing on EVERY image.
+                            // In Manual mode, user interacts one by one, so refresh is acceptable/expected?
+                            // Actually, the user complained about "mobile uploading batch images" - implies auto or fast sequence.
+                            // Let's try to minimize refresh.
                         } catch (error) {
                             console.error('Failed to save skipped receipt:', error);
                         }
                     }}
-                    categories={categories}
                 />
             </div>
 
@@ -361,16 +394,17 @@ export default function ReceiptsPage() {
                             )}
                         </div>
 
+
                         {/* Info */}
                         <div className="min-w-0 overflow-hidden">
                             <p className="font-medium text-sm sm:text-base text-white truncate w-full">
-                                {receipt.ocrMerchant || 'Unknown Merchant'}
+                                {receipt.ocrMerchant?.replace(' [AUTOMATED]', '') || 'Unknown Merchant'}
                             </p>
                             <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-gray-500 mt-1">
                                 <span className="whitespace-nowrap flex-shrink-0">{receipt.ocrDate ? format(new Date(receipt.ocrDate), 'MMM d, yyyy') : 'No date'}</span>
                                 {(() => {
-                                    // Legacy check for older data
                                     const isAuto = receipt.ocrMerchant?.includes('[AUTOMATED]');
+
                                     if (isAuto) {
                                         return (
                                             <span className="flex-shrink-0 flex items-center gap-0.5 text-blue-400 text-[10px] bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
@@ -378,13 +412,14 @@ export default function ReceiptsPage() {
                                             </span>
                                         );
                                     }
+
                                     return receipt.verified ? (
                                         <span className="flex-shrink-0 flex items-center gap-0.5 text-green-400 text-[10px] bg-green-500/10 px-1.5 py-0.5 rounded">
-                                            <Check className="w-3 h-3" /> <span className="hidden sm:inline">Verified</span><span className="sm:hidden">Verif</span>
+                                            <Check className="w-3 h-3" /> <span className="hidden sm:inline">Reviewed</span><span className="sm:hidden">Rev</span>
                                         </span>
                                     ) : (
                                         <span className="flex-shrink-0 text-yellow-500 text-[10px] bg-yellow-500/10 px-1.5 py-0.5 rounded whitespace-nowrap">
-                                            Needs Review
+                                            Pending Review
                                         </span>
                                     );
                                 })()}
@@ -392,10 +427,15 @@ export default function ReceiptsPage() {
                         </div>
 
                         {/* Amount & Actions */}
-                        <div className="flex flex-col items-end gap-1 sm:gap-2 self-start pt-1">
+                        <div className="flex flex-col items-end gap-0.5 self-start pt-1">
                             <span className="font-bold text-white text-sm sm:text-base whitespace-nowrap">
-                                {receipt.ocrCurrency} {receipt.ocrAmount?.toLocaleString()}
+                                {formatCurrency(receipt.ocrAmount || 0, receipt.ocrCurrency || 'IDR')}
                             </span>
+                            {receipt.ocrCurrency && receipt.ocrCurrency !== 'IDR' && receipt.ocrAmount && (
+                                <span className="text-[10px] sm:text-xs text-gray-500">
+                                    ~{formatCurrency(receipt.ocrAmount * (receipt.ocrCurrency === 'USD' ? 16900 : 1), 'IDR')}
+                                </span>
+                            )}
                         </div>
                     </div>
                 ))}

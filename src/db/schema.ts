@@ -32,6 +32,7 @@ export const receipts = sqliteTable('receipts', {
   ocrAmount: real('ocr_amount'),
   ocrCurrency: text('ocr_currency'),
   ocrConfidence: real('ocr_confidence'),
+  fileName: text('file_name'),
   verified: integer('verified', { mode: 'boolean' }).default(false),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 });

@@ -35,13 +35,17 @@ interface ScanResult extends OCRResult {
     editedMerchant?: string;
     editedCategoryId?: string;
     isAutomated?: boolean;
+    fileName?: string;
+    isDuplicateWarning?: boolean;
 }
 
 interface ReceiptScannerProps {
     onScanComplete?: (results: ScanResult[]) => void;
     onCreateTransaction?: (result: ScanResult) => void;
     onSkip?: (result: ScanResult) => void;
+    onBatchComplete?: () => void;
     categories?: Category[];
+    existingReceipts?: any[];
 }
 
 interface UploadProgress {
@@ -51,7 +55,7 @@ interface UploadProgress {
     currentStep?: string;
 }
 
-export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, categories = [] }: ReceiptScannerProps) {
+export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, onBatchComplete, categories = [], existingReceipts = [] }: ReceiptScannerProps) {
     const [isDragging, setIsDragging] = useState(false);
     const [results, setResults] = useState<ScanResult[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -61,11 +65,39 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
     const [isAutoMode, setIsAutoMode] = useState(false); // New Auto Mode toggle
     const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    // Track processed file signatures (name + size) to prevent duplicates in current session
+    const [processedSignatures, setProcessedSignatures] = useState<Set<string>>(new Set());
 
     const completedResults = results.filter(r => r.status === 'completed');
 
     const processFiles = useCallback(async (files: File[]) => {
         if (files.length === 0) return;
+
+        // Filter duplicates
+        const uniqueFiles: File[] = [];
+        const ignoredFiles: string[] = [];
+
+        for (const file of files) {
+            // Check 1: Session-based duplicate (exact file object or name+size in current batch)
+            const signature = `${file.name}-${file.size}`;
+
+            // Check 2: Database-based duplicate (filename match against existing receipts)
+            // Note: matching by filename is what the user requested ("filename that are already inside the data")
+            const isDbDuplicate = existingReceipts.some(r => r.fileName === file.name);
+
+            if (processedSignatures.has(signature) || isDbDuplicate) {
+                ignoredFiles.push(file.name);
+            } else {
+                uniqueFiles.push(file);
+                setProcessedSignatures(prev => new Set(prev).add(signature));
+            }
+        }
+
+        if (ignoredFiles.length > 0) {
+            alert(`Skipped ${ignoredFiles.length} duplicate file(s) (already exists):\n${ignoredFiles.join('\n')}`);
+        }
+
+        if (uniqueFiles.length === 0) return;
 
         setIsProcessing(true);
         // If not in auto mode, prepare for review. In auto mode, we stay on the screen.
@@ -77,14 +109,14 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
         const startIndex = results.length;
 
         // Initialize progress tracking
-        const initialProgress: UploadProgress[] = files.map((file) => ({
+        const initialProgress: UploadProgress[] = uniqueFiles.map((file) => ({
             filename: file.name,
             status: 'waiting' as const,
             progress: 0,
         }));
         setUploadProgress(initialProgress);
 
-        const processingResults: ScanResult[] = files.map(() => ({
+        const processingResults: ScanResult[] = uniqueFiles.map(() => ({
             imageBase64: '',
             rawText: '',
             merchant: null,
@@ -99,9 +131,8 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
 
         setResults(prev => [...prev, ...processingResults]);
 
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            if (!file.type.startsWith('image/')) continue;
+        for (let i = 0; i < uniqueFiles.length; i++) {
+            const file = uniqueFiles[i];
 
             const index = startIndex + i;
 
@@ -170,8 +201,6 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                 }
 
                 const merchantName = ocrResult.merchant || '';
-                // In Auto Mode, we append [AUTOMATED] to the merchant name so it's tagged visible
-                // and we also rely on isAutomated flag if parent uses it.
                 const finalMerchantName = merchantName;
 
                 const completedResult: ScanResult = {
@@ -183,6 +212,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
                     editedDate: (ocrResult.date && /^\d{4}-\d{2}-\d{2}$/.test(ocrResult.date)) ? ocrResult.date : format(new Date(), 'yyyy-MM-dd'),
                     editedMerchant: finalMerchantName,
                     isAutomated: isAutoMode,
+                    fileName: file.name,
                 };
 
                 setResults(prev => {
@@ -195,7 +225,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
 
                 // In Auto Mode, save immediately
                 if (isAutoMode) {
-                    onCreateTransaction?.(completedResult);
+                    await onCreateTransaction?.(completedResult); // Await to ensure seq
                 }
 
                 // Mark as complete
@@ -231,16 +261,16 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
             setUploadProgress([]);
         }, 3000);
 
-        // If NOT in auto mode and we have new results, open review
-        if (!isAutoMode && newResults.length > 0) {
+        // Batch complete notification
+        if (isAutoMode) {
+            onBatchComplete?.();
+            setResults([]);
+        } else if (newResults.length > 0) {
+            // Manual mode
             setIsReviewMode(true);
             setCurrentIndex(0);
-        } else if (isAutoMode) {
-            // In auto mode, we just clear results after processing because they are saved.
-            // We keep them in result state briefly during processing but clear now to avoid review modal logic.
-            setResults([]);
         }
-    }, [results.length, useEnhancement, isAutoMode, onCreateTransaction]);
+    }, [results.length, useEnhancement, isAutoMode, onCreateTransaction, onBatchComplete, processedSignatures]);
 
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -297,6 +327,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
             // Last item
             setIsReviewMode(false);
             setResults([]);
+            onBatchComplete?.();
         }
     };
 
@@ -311,6 +342,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
         } else {
             setIsReviewMode(false);
             setResults([]);
+            onBatchComplete?.();
         }
     };
 
@@ -322,6 +354,7 @@ export function ReceiptScanner({ onScanComplete, onCreateTransaction, onSkip, ca
         }
         setIsReviewMode(false);
         setResults([]);
+        onBatchComplete?.();
     };
 
     const currentResult = completedResults[currentIndex];

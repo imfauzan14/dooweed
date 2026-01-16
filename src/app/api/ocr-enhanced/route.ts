@@ -95,7 +95,7 @@ If data is ambiguous or missing, set to null. Do not guess.`
                 merchant: parsed.merchant || null,
                 date: parsed.date || null,
                 amount: parsed.totalAmount ?? null,
-                currency: parsed.currency || 'IDR',
+                currency: parsed.currency || null, // Allow null if not detected, don't force IDR
                 transactionType: parsed.transactionType || 'expense',
                 items: parsed.items || [],
                 confidence: parsed.confidence ?? 0.9,

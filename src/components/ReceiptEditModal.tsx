@@ -171,8 +171,8 @@ export function ReceiptEditModal({
                 });
             }
 
-            onSuccess();
             onClose();
+            onSuccess();
         } catch (error) {
             console.error('Failed to delete:', error);
             setIsSaving(false);

@@ -403,11 +403,7 @@ export default function TransactionsPage() {
                                                     <p className="font-medium text-white truncate text-sm sm:text-base w-full">
                                                         {(t.description || t.category?.name || 'Transaction')}
                                                     </p>
-                                                    {t.receiptId && (
-                                                        <span className="hidden sm:flex flex-shrink-0 items-center gap-0.5 text-blue-400 text-[10px] bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
-                                                            <Zap className="w-3 h-3" /> Auto
-                                                        </span>
-                                                    )}
+                                                    {/* Auto tag removed from Transactions as requested */}
                                                 </div>
                                                 {/* Hide tags on mobile */}
                                                 <div className="hidden sm:flex flex-wrap gap-2">
@@ -440,6 +436,11 @@ export default function TransactionsPage() {
                                                     {t.type === 'income' ? '+' : '-'}
                                                     {formatCurrency(t.amount, t.currency || 'IDR')}
                                                 </p>
+                                                {t.currency && t.currency !== 'IDR' && t.amountInBase && (
+                                                    <p className="text-[10px] sm:text-xs text-gray-500">
+                                                        ~{formatCurrency(t.amountInBase, 'IDR')}
+                                                    </p>
+                                                )}
                                                 <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5">
                                                     {format(new Date(t.date), 'MMM d')}
                                                 </p>
