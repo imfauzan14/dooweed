@@ -1,8 +1,6 @@
-import 'dotenv/config';
 import { config } from 'dotenv';
 import type { Config } from 'drizzle-kit';
 
-// Load .env.local for drizzle-kit CLI
 config({ path: '.env.local' });
 
 export default {
